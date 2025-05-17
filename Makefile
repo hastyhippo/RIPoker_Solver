@@ -16,7 +16,7 @@ all: $(TARGET)
 
 # Link the object files to create executable
 $(TARGET): $(OBJS)
-	$(CXX) -mconsole $(OBJS) -o $(TARGET)
+	$(CXX) $(OBJS) -o $(TARGET)
 
 # Compile .cpp to .o
 src/%.o: src/%.cpp
