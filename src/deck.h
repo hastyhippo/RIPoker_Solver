@@ -14,5 +14,4 @@ class Deck {
     public: 
         Card Draw();
         Deck();
-
 };
