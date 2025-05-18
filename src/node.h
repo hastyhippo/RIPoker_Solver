@@ -5,6 +5,7 @@
 #include <stack>
 #include <vector>
 
+using namespace std;
 
 class Node {
     private:

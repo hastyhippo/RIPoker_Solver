@@ -37,5 +37,5 @@ Card Deck::Draw() {
     Card c = cards.top();
     cards.pop();
     return c;
-
 }
+

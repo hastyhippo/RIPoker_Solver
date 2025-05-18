@@ -9,15 +9,14 @@
 
 using namespace std;
 
-#define NUM_ACTIONS 2
+#define NUM_ACTIONS 2.0
 
 Node::Node() {
 
 }
 
 void Node::UpdateRegret(vector<double> new_regret) {
-    int n = regret_sum.size();
-    for (int i = 0; i < n; i++) {
+    for (int i = 0; i < NUM_ACTIONS; i++) {
         regret_sum[i] += new_regret[i];
         strategy_sum[i] += strategy[i];
     }
@@ -25,26 +24,24 @@ void Node::UpdateRegret(vector<double> new_regret) {
 
 void Node::UpdateStrategy() {
     double normalising_sum = 0;
-    int n = regret_sum.size();
-    for (int i = 0; i < n; i++) {
+    for (int i = 0; i < NUM_ACTIONS; i++) {
         normalising_sum += max(0.0, regret_sum[i]);
     }
 
     if (normalising_sum == 0) {
-        strategy = vector<double>(n, 1.0/n);
+        strategy = vector<double>(NUM_ACTIONS, 1.0/NUM_ACTIONS);
     }
 
-    for (int i = 0; i < n; i++) {
+    for (int i = 0; i < NUM_ACTIONS; i++) {
         strategy[i] = max(0.0, regret_sum[i]/normalising_sum);
     }
 }
 
 vector<double> Node::GetFinalStrategy() {
-    int n = strategy.size();
-    vector<double> final_strategy(n);
+    vector<double> final_strategy(NUM_ACTIONS);
     double normalising_sum = 0.0;
     for (auto a : strategy_sum) normalising_sum += a;
-    for (int i = 0; i < n; i++) {
+    for (int i = 0; i < NUM_ACTIONS; i++) {
         final_strategy[i] = strategy_sum[i] / normalising_sum;
     }
     return final_strategy;

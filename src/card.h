@@ -2,6 +2,7 @@
 #include<string>
 #include<cmath>
 #include<algorithm>
+#include<map>
 
 using namespace std;
 
@@ -15,5 +16,6 @@ class Card {
         string getName();
         Card(int value);
         Card() : card_value(-1) {};
-
+    static int getHashing(Card c1, Card c2, Card c3);
+    static void initialiseMap(map<int, int> &mp);
 };
