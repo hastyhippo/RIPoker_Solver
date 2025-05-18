@@ -14,8 +14,8 @@ Game::Game(int num_players) {
     Deck cards = Deck();
 
     // Create the cards that the players receive
-    vector<Card>(0);
-    vector<Card>(2);
+    vector<Card> hands(0);
+    vector<Card> board(2);
 
     for (int i = 0; i < num_players; i++) {
         hands.push_back(cards.Draw());

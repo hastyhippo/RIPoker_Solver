@@ -6,7 +6,6 @@
 #include <vector>
 
 #include "deck.h"
-#include "cfr_solver.h"
 
 using namespace std;
 
