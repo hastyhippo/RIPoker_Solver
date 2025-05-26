@@ -1,3 +1,4 @@
+#pragma once
 #include<iostream>
 #include<string>
 #include<cmath>
@@ -16,6 +17,7 @@ class Card {
         string getName();
         Card(int value);
         Card() : card_value(-1) {};
-    static int getHashing(Card c1, Card c2, Card c3);
-    static void initialiseMap(map<int, int> &mp);
+    static int getStrength(Card c1, Card c2, Card c3);
+    static void initialiseMap();
+    static map<int, int> handStrengthMap; 
 };

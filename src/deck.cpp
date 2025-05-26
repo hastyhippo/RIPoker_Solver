@@ -9,33 +9,39 @@
 
 using namespace std;
 
+#define NUM_CARDS 24
 Deck::Deck() {
-    stack<Card> cards;
-
-    vector<int> v(52);
-    for (int i = 0; i < 52; i++) {
-        v[i] = i;
+    vector<Card> v(NUM_CARDS);
+    for (int i = 0; i < NUM_CARDS; i++) {
+        v[i] = Card(i);
     }
 
     random_device rd;
     mt19937 g(rd());
     shuffle(v.begin(), v.end(), g);
+    it = 0;
 
-    for (int i = 0; i < 52; i++) {
-        Card next_card(v[i]);
-        cards.push(next_card); 
-    }
-
-    this->cards = cards;
+    this->cards = v;
 }
 
 Card Deck::Draw() {
-    if (cards.empty()) {
+    if (it >= (int)cards.size()) {
         cout << "deck is empty\n";
         return Card(-1);
     }
-    Card c = cards.top();
-    cards.pop();
-    return c;
+    return cards[it++];
 }
 
+void Deck::Shuffle() {
+    random_device rd;
+    mt19937 g(rd());
+    shuffle(cards.begin(), cards.end(), g);
+
+}
+
+void Deck::PrintDeck() {
+    for (auto a : cards) {
+        cout << a.getName() << " ";
+    }
+    cout << "\n";
+}
