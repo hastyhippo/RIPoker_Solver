@@ -1,3 +1,4 @@
+#pragma once
 #include <iostream>
 #include <string>
 #include <cmath>
@@ -7,14 +8,19 @@
 #include <map>
 #include <cstdint>
 
-#include "game.h"
 #include "node.h"
+
+class Game;
+
+using namespace std;
 
 class CFRSolver {
     private:
-        map<uint64_t, Node> positionMap;
+        map<string, Node> positionMap;
 
     public: 
         CFRSolver(int num_players);
-        double CFR(Game G);
+        int getAction(string s);
+        Node getNode(string history);
+
 };

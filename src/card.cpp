@@ -11,8 +11,9 @@ using namespace std;
 #define NUM_CARDS 12
 vector<string> suitNames = {"Spades", "Clubs", "Diamonds", "Hearts"};
 vector<string> valueNames = {"2", "3", "4", "5", "6", "7", "8", "9", "T", "J", "Q", "K", "A"};
-vector<int> cardHashingValues = {2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 43};
+vector<int> primeValue = {2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 43};
 int hasFlush = 47;
+map<int, int> Card::handStrengthMap;
 
 Card::Card(int value){
     if(value >= 52 || value < -1) {
@@ -35,67 +36,63 @@ string Card::getName() {
     return valueNames[card_value / 4] + " of " + suitNames[card_value % 4];
 }
 
-int Card::getHashing(Card c1, Card c2, Card c3) {
+int Card::getStrength(Card c1, Card c2, Card c3) {
     int hash = 1;
 
     if (c1.getSuit() == c2.getSuit() && c2.getSuit() == c3.getSuit()) {
         hash *= hasFlush;
     }
 
-    hash *= cardHashingValues[c1.getValue()];
-    hash *= cardHashingValues[c2.getValue()];
-    hash *= cardHashingValues[c3.getValue()];
-    return hash;
+    hash *= primeValue[c1.getValue()];
+    hash *= primeValue[c2.getValue()];
+    hash *= primeValue[c3.getValue()];
+    if (Card::handStrengthMap.count(hash) == 0) {
+        return -1;
+    } 
+    return Card::handStrengthMap[hash];
 }
 
-void Card::initialiseMap(map<int, int> &mp){
+void Card::initialiseMap(){
     int strength = 0;
     //Straight Flush
     for (int i = NUM_CARDS - 2; i >=0; i--) {
-        mp[hasFlush * cardHashingValues[i] * cardHashingValues[i+1] * cardHashingValues[i+2]] = strength++;
+        Card::handStrengthMap[hasFlush * primeValue[i] * primeValue[i+1] * primeValue[i+2]] = strength++;
     }
-    cout << "SF: " << strength << '\n';
     // Trips
     for (int i = NUM_CARDS; i >= 0; i--) {
-        mp[cardHashingValues[i] * cardHashingValues[i] * cardHashingValues[i]] = strength++;
+        Card::handStrengthMap[primeValue[i] * primeValue[i] * primeValue[i]] = strength++;
     }
-    cout << "Trips: " << strength << '\n';
 
     // Straight
     for (int i = NUM_CARDS - 2; i >= 0; i--) {
-        mp[cardHashingValues[i] * cardHashingValues[i+1] * cardHashingValues[i+2]] = strength++;
+        Card::handStrengthMap[primeValue[i] * primeValue[i+1] * primeValue[i+2]] = strength++;
     }
-    cout << "Straight: " << strength << '\n';
 
     //Flush
     for (int i = NUM_CARDS; i >= 0; i--) {
         for (int j = i - 1; j >= 0; j--) {
             for (int k = j - 1; k >= 0; k--) {
-                if (mp.count(cardHashingValues[i] * cardHashingValues[j] * cardHashingValues[k] * hasFlush) != 0) continue;
-                mp[hasFlush * cardHashingValues[i] * cardHashingValues[j] * cardHashingValues[k]] = strength++;
+                if (Card::handStrengthMap.count(primeValue[i] * primeValue[j] * primeValue[k] * hasFlush) != 0) continue;
+                Card::handStrengthMap[hasFlush * primeValue[i] * primeValue[j] * primeValue[k]] = strength++;
             }
         }
     }
-    cout << "Flush: " << strength << '\n';
 
     //PAIR
     for (int i = NUM_CARDS; i >= 0; i--) {
         for (int j = NUM_CARDS; j >= 0; j--) {
             if (i == j) continue;
-            mp[cardHashingValues[i] * cardHashingValues[i] * cardHashingValues[j]] = strength++;
+            Card::handStrengthMap[primeValue[i] * primeValue[i] * primeValue[j]] = strength++;
         }
     }
-    cout << "Pair: " << strength << '\n';
 
     //HIGH CARD
     for (int i = NUM_CARDS; i >= 0; i--) {
         for (int j = i - 1; j >= 0; j--) {
             for (int k = j - 1; k >= 0; k--) {
-                if (mp.count(cardHashingValues[i] * cardHashingValues[j] * cardHashingValues[k]) != 0) continue;
-                mp[cardHashingValues[i] * cardHashingValues[j] * cardHashingValues[k]] = strength++;
+                if (Card::handStrengthMap.count(primeValue[i] * primeValue[j] * primeValue[k]) != 0) continue;
+                Card::handStrengthMap[primeValue[i] * primeValue[j] * primeValue[k]] = strength++;
             }
         }
     }
-    cout << "High Card: " << strength << '\n';
-
 }
