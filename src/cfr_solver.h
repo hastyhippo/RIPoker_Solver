@@ -11,6 +11,7 @@
 #include "node.h"
 
 class Game;
+class Node;
 
 using namespace std;
 
@@ -22,5 +23,6 @@ class CFRSolver {
         CFRSolver(int num_players);
         int getAction(string s);
         Node getNode(string history);
+        void TrainCFR(CFRSolver cfr);
 
 };
