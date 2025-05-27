@@ -12,7 +12,7 @@
 using namespace std;
 
 #define NUM_ACTIONS 2.0
-#define BET_1_MAX 0.2
+#define BET_1_MAX 0.5
 #define BET_2_MAX 0.4
 #define BET_3_MAX 0.6
 #define BET_4_MAX 0.85
@@ -59,8 +59,8 @@ using namespace std;
     Betting sequence
     String:
         '0' - Check/Call
-        '1' - min-20% 
-        '2' - 20%->40%
+        '1' - min-25% 
+        '2' - 25%->40%
         '3' - 40%->60%
         '4' - 60%->85%
         '5' - 85%->110%

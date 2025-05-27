@@ -6,10 +6,12 @@
 #include <vector>
 
 #include "node.h"
+#include "game.h"
+
 using namespace std;
 
 #define ANTE 1
-#define NUM_ACTIONS 2
+#define NUM_ACTIONS 18
 
 
 bool Game::GameEnd() {
@@ -19,6 +21,7 @@ bool Game::GameEnd() {
     }
     return cnt == 1;
 }
+
 Game::Game(int startingStack, int num_players) {
     this->num_players = num_players;
     this->deck = Deck();
@@ -36,6 +39,26 @@ Game::Game(int startingStack, int num_players) {
     this->pot = 0;
 }
 
+void Game::InitialiseGame() {
+    deck.Shuffle();
+    deck.PrintDeck();
+    for (int i = 0; i < num_players; i++) {
+        hands[i] = deck.Draw();
+    }
+    board[0] = deck.Draw(); 
+    board[1] = deck.Draw();
+
+    cout << "Players ante " << ANTE << " chip/s each" << '\n';
+    for (int i = 0; i < num_players; i++) {
+        chips[i] -= ANTE;
+        pot += ANTE;
+    }
+}
+
+void Game::MakeMove() {
+
+}
+
 bool isNumber(const string& s) {
     return !s.empty() && all_of(s.begin(), s.end(), ::isdigit);
 }
@@ -46,47 +69,6 @@ void printArray(vector<int>v) {
         cout << a << " | ";
     }
     cout << "\n";
-}
-
-bool isTerminal(vector<string> history) {
-
-}
-
-double getUtility() {
-    
-}
-
-void TrainCFR(CFRSolver cfr) {
-
-}
-// Only working for 2p 
-double CFR(CFRSolver cfr, vector<string> history, double p1, double p2, bool player) {
-    if (isTerminal(history)) {
-        return getUtility();
-    }
-
-    // has the position properly
-    Node currentNode = cfr.getNode("ASD");
-    vector<double> strategy = currentNode.strategy;
-
-    vector<double> action_val(12);
-    double node_utility = 0;
-    for (int i = 0; i < 12; i++) {
-        // check if the move is valid
-
-        // updat ehistory properly
-        if (player) {
-            action_val[i] = -CFR(cfr, history, p1 * strategy[i], p2, !player);
-        } else {
-            action_val[i] = -CFR(cfr, history, p1, p2 * strategy[i], !player);
-        }
-        node_utility += action_val[i] * strategy[i];
-    }
-
-    for (int i = 0; i < NUM_ACTIONS; i++) {
-        currentNode.UpdateStrategy();
-    }
-    return node_utility;
 }
 
 
@@ -228,20 +210,9 @@ void Game::GameLoop(int stage, int num_players, int curr_player, int last_bet, i
     GameLoop(stage, num_players, (curr_player+1) % num_players, last_bet, last_bet_size, bet_states, in_hand, game_history);
 
 }
-void Game::StartGame(int player_to_act) {
-    deck.Shuffle();
-    deck.PrintDeck();
-    for (int i = 0; i < num_players; i++) {
-        hands[i] = deck.Draw();
-    }
-    board[0] = deck.Draw(); 
-    board[1] = deck.Draw();
 
-    cout << "Players ante " << ANTE << " chip/s each" << '\n';
-    for (int i = 0; i < num_players; i++) {
-        chips[i] -= ANTE;
-        pot += ANTE;
-    }
+void Game::StartGame(int player_to_act) {
+
 
     int last_player = (player_to_act + num_players - 1) % num_players;
     vector<int> bet_states(num_players);
