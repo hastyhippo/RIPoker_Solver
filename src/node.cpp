@@ -10,7 +10,12 @@
 #include "node.h"
 
 using namespace std;
+#define CHECK 0
+#define FOLD 1
 
+#define PREFLOP 0
+#define FLOP 1
+#define TURN 2
 #define NUM_ACTIONS 2.0
 #define BET_1_MAX 0.5
 #define BET_2_MAX 0.4
@@ -94,11 +99,11 @@ Node::Node() {
 }
 
 char Node::GetAction(int pot, int bet_size, int flag) {
-    if (flag == Game::CHECK) {
+    if (flag == CHECK) {
         //Check call
         return '0';
     } 
-    if (flag == Game::FOLD) {
+    if (flag == FOLD) {
         return 'f';
     }
     double ratio = (double)bet_size / pot;
@@ -164,15 +169,15 @@ int getSPR(double spr) {
 string Node::GetHash(int stage, bool can_raise, double spr, string game_history, Card hole, Card board1, Card board2) {
     uint32_t hash = 0;
     hash |= hole.getValue() | (board1.getValue() << 4) | (board2.getValue() << 8);
-    if (stage == Game::FLOP) hash |= FLOP_MASK | TURN_MASK;
-    if (stage == Game::TURN) hash |= TURN_MASK;
+    if (stage == FLOP) hash |= FLOP_MASK | TURN_MASK;
+    if (stage == TURN) hash |= TURN_MASK;
 
     hash |= getSPR(spr) << 14; 
     cout << "SPR: " <<  spr << '\n';
-    if(stage == Game::FLOP) {
+    if(stage == FLOP) {
         if (hole.getSuit() == board1.getSuit()) hash |= (1 << 12);
     }
-    if(stage == Game::TURN) {
+    if(stage == TURN) {
         //bricked flush draw
         if ((hole.getSuit() == board1.getSuit()) && (board1.getSuit() != board2.getSuit())) hash |= (1 << 12);
         //flush completes

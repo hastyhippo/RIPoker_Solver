@@ -14,23 +14,33 @@ int main() {
 
     int num_players = 2;
     int starting_stack = 200;
-    CFRSolver cfr(num_players);    
+    CFRSolver cfr(starting_stack);    
 
-    while (true) {
-        Game g(starting_stack,num_players);
+    Game g(starting_stack);
+    g.InitialiseGame(0);
+    while (!g.terminal) {
+        g.GetActions();
 
-        cout << "How many games: \n";
-        int iterations;
-        cin >> iterations;
-
-        for (int i = 0; i < iterations; i++) {
-            if (g.GameEnd()) {
-                g = Game(starting_stack, num_players);
-            }
-
-            g.StartGame(0);
-        }
+        int action;
+        cin >> action;
+        if (action >= 0 && action <= 18) g.MakeMove(action);
+        g.UnmakeMove();
     }
+    // while (true) {
+    //     Game g(starting_stack);
+
+    //     cout << "How many games: \n";
+    //     int iterations;
+    //     cin >> iterations;
+
+    //     for (int i = 0; i < iterations; i++) {
+    //         if (g.GameEnd()) {
+    //             g = Game(starting_stack);
+    //         }
+
+    //         g.StartGame(0);
+    //     }
+    // }
 
 
     return 0;
