@@ -12,36 +12,31 @@ class CFRSolver;
 using namespace std;
 class Game {
     private:
-        int num_players = 2;
-        void GameLoop(int stage, int num_players, int curr_player, int last_bet, int last_bet_size, vector<int> &bet_states, vector<bool> &in_hand, string &game_history);
 
     public:
+        Game(int starting_stack);
+        int first_to_act;
+        int player; // 0 or 1
+        int stage;
+        vector<int> effective_stack;
         vector<int> chips;
-        vector<int> bet_states;
+        vector<vector<int>> bet_states;
         int pot;
         Deck deck;
         vector<Card> hands;
         vector<Card> board;
 
+        stack<string> moveHistory;
+
         string history;
+        bool terminal;
 
-        Game(int starting_stack, int num_players);
-        void StartGame(int playerTurn);
-
-        void InitialiseGame();
-        void PrintGame();
+        //Built
+        void InitialiseGame(int OOP);
+        string PrintGame(bool print);
         
-        void ResetGame();
-        bool GameEnd();
-        void MakeMove();
-
-        static constexpr int CHECK = 0;
-        static constexpr int BET = 1;
-        static constexpr int FOLD = 2;
-        static constexpr int RAISE = 3;
-
-        static constexpr int PREFLOP = 0;
-        static constexpr int FLOP = 1;
-        static constexpr int TURN = 2;
-
+        // TODO
+        vector<bool> GetActions(bool print);
+        void MakeMove(int move_type);
+        void UnmakeMove();
 };
