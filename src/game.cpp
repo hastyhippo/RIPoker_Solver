@@ -6,6 +6,7 @@
 #include <vector>
 #include <map>
 #include <unordered_map>
+#include <cassert>
 
 #include "node.h"
 #include "game.h"
@@ -25,6 +26,10 @@ vector<double> bet_sizings = {0.2, 0.33, 0.5, 0.66, 0.8, 1, 1.5, 2, 3};
 vector<double> raise_sizings = {2.2, 2.6, 3, 3.6, 4.5};
 vector<string> move_names = {"Check", "B20", "B33", "B50", "B66", "B80", "B100", "B150", "B200", "B300", "BALL",
 "FOLD", "CALL", "R2.2", "R2.6", "R3", "R3.6", "R4.5", "RALL"};
+
+bool isNumber(const string& s) {
+    return !s.empty() && all_of(s.begin(), s.end(), ::isdigit);
+}
 
 /*
     Actions:
@@ -50,32 +55,36 @@ vector<string> move_names = {"Check", "B20", "B33", "B50", "B66", "B80", "B100",
     - 5 R 4.5x (17)
     - A R ALLIN (18)
 */
-void printArray(vector<int>v) {
-    cout << "| ";
-    for (auto a : v) {
-        cout << a << " | ";
+string printArray(vector<int>v) {
+    string str = "";
+    str += "| ";
+    for (int a : v) {
+        str += to_string(a) + " | ";
     }
-    cout << "\n";
+    str += "\n";
+    return str;
 }
 
-void Game::PrintGame() {
-    cout << "\n";
-    cout << "Stage: " << stage << '\n';
-    cout << "Number of players: " << NUM_PLAYERS <<  " | Action on: " << player << " | OOP: " << first_to_act << " \n";
-    cout << "Board: " << board[0].getName() << " | " << board[1].getName() << '\n'; 
-    cout << "Pot: " << pot <<  '\n';
+string Game::PrintGame(bool print) {
+    string str = "";
+    str += "\n";
+    str += "Stage: " + to_string(stage) + '\n';
+    str += "Number of players: " +  to_string(NUM_PLAYERS) +  " | Action on: " + to_string(player) + " | OOP: " + to_string(first_to_act) + " \n";
+    str +=  "Board: " + board[0].getName() + " | " + board[1].getName() + '\n'; 
+    str += "Pot: " + to_string(pot) + '\n';
     for (int i = 0; i < NUM_PLAYERS; i++) {
-        cout << "Player: " << i << " | Stack: " << effective_stack[i] <<  " | Card: " << hands[i].getName() << "\n";
+        str += "Player: " + to_string(i) + " | Stack: " + to_string(effective_stack[i]) + " | Card: " + hands[i].getName() + "\n";
     }
 
-    cout << "Bet states\n";
+    str += "Bet states\n";
     for (int i = 0; i < 3; i++) {
-        cout << "Stage:  " << i << ": ";
-        printArray(bet_states[i]);
+        str += "Stage:  " + to_string(i) + ": ";
+        str += printArray(bet_states[i]);
     }
-    cout << "Terminal: " << terminal << "\n\n\n";
+    str += "Terminal: " + to_string(terminal) + "\n\n";
+    if(print) cout << str;
+    return str;
 }
-
 
 Game::Game(int startingStack) {
     this->deck = Deck();
@@ -146,11 +155,13 @@ void Game::InitialiseGame(int OOP) {
     - A R ALLIN (18)
 */ 
 
-vector<bool> Game::GetActions() {
-    vector<bool> actions(19,false);
+vector<bool> Game::GetActions(bool print) {
+    vector<bool> actions(NUM_ACTIONS + 1,false);
+    if(terminal) return actions;
+
     if(bet_states[stage][0] == 0 && bet_states[stage][1] == 0) {
         // X is available
-        actions[0] = true;
+        actions[CHECK] = true;
         unordered_map<int, int> values;
 
         for (int i = 1; i <= 9; i++) {
@@ -161,130 +172,154 @@ vector<bool> Game::GetActions() {
             }
         }
         // allin always available
-        if(effective_stack[1-player] > 0 && effective_stack[player] > 0) {
-            actions[10] = true;
+        if(effective_stack[1 - player] > 0 && effective_stack[player] > 0) {
+            actions[ALLIN_BET] = true;
         }    
     } else {
-        // Facing a bet/raise
-        //  Fold/Call always available
-        actions[11] = true;
-        actions[12] = true;
+        // Facing a bet/raise - Fold/Call always available
+        actions[FOLD] = true;
+        actions[CALL] = true;
 
         unordered_map<int, int> values;
 
         for (int i = 13; i <= 17; i++) {
-            int raise_size = bet_states[stage][1-player] * raise_sizings[i-13];
+            int raise_size = bet_states[stage][1 - player] * raise_sizings[i-13];
             if (values.count(raise_size) == 0 && raise_size < effective_stack[player] && raise_size > 0) {
                 values[raise_size]++;
                 actions[i] = true;
             }
         }
-        if(effective_stack[1-player] > 0 && effective_stack[player] > 0) {
-            actions[18] = true;
+        if(effective_stack[1 - player] > 0 && effective_stack[player] > 0) {
+            actions[ALLIN_RAISE] = true;
         }
     }
 
-    for (int i = 0; i <= 18; i++) {
-        if (actions[i]) {
-            cout << i << " | " << move_names[i];
-            if (i >= 1 && i <= 9) {
-                cout << " : " << (int)(pot * bet_sizings[i-1]) << '\n';
-            } else if (i >= 13 && i <= 17) {
-                cout << " : " << (int)(bet_states[stage][1-player] * raise_sizings[i-13])  << '\n';
-            } else {
-                cout << '\n';
-            }
-        } 
+    if(print) {
+        for (int i = 0; i <= NUM_ACTIONS; i++) {
+            if (actions[i]) {
+                cout << i << " | " << move_names[i];
+                if (i >= 1 && i <= 9) {
+                    cout << " : " << (int)(pot * bet_sizings[i-1]) << '\n';
+                } else if (i >= 13 && i <= 17) {
+                    cout << " : " << (int)(bet_states[stage][1 - player] * raise_sizings[i-13])  << '\n';
+                } else {
+                    cout << '\n';
+                }
+            } 
+        }
+        cout << '\n';
     }
-    cout << '\n';
+
     return actions;
 }
 
 void Game::MakeMove(int move_type) {
     // int effective_stack = min(effective_stack[0], effective_stack[1]);
     bool update_stage = false;
+    assert(terminal == false);
 
     if (move_type == CHECK) {
-        if (!moveHistory.empty() && moveHistory.top() == "X") {
+        // if last move is also a check, skip to next stage
+        if (!moveHistory.empty() && 
+        moveHistory.top().length() == 3 && moveHistory.top().substr(1,2) == "B0") {
             stage++;
             update_stage = true;
         }
-        moveHistory.push("X");
+        moveHistory.push(to_string(player) + "B0");
 
         // if it checks through
     } else if (move_type == FOLD) {
-        moveHistory.push("F");
+        moveHistory.push(to_string(player) + "F");
         terminal = true;
     }
     else if (move_type == CALL) {
-        moveHistory.push("C");
-        effective_stack[player] -= (bet_states[stage][1-player] - bet_states[stage][player]);
-        bet_states[stage][player] = bet_states[stage][1-player];
+        int call_size = bet_states[stage][1 - player] - bet_states[stage][player];
+        assert(call_size > 0);
+
+        moveHistory.push(to_string(player) + "B" + to_string(call_size));
+        effective_stack[player] -= (bet_states[stage][1 - player] - bet_states[stage][player]);
+        bet_states[stage][player] = bet_states[stage][1 - player];
+
+        // End state - increase pot size
         pot += bet_states[stage][player] * 2;
 
+        // Calling will always end action for 2p
         stage++;
         update_stage = true;
 
+        // If either play is allin, then the node is terminal
         if (effective_stack[0] == 0 && effective_stack[1] == 0) {
             terminal = true;
         }
     } else if (move_type == ALLIN_BET || move_type == ALLIN_RAISE) {
-        moveHistory.push("A");
-        if (effective_stack[player] > 0) {
-            bet_states[stage][player] += effective_stack[player];
-            effective_stack[player] = 0;
-        } else {
-            cout << "you already all in blud\n";
-        }
+        // equivalent of betting whole stack
+        moveHistory.push(to_string(player) + "B" + to_string(effective_stack[player]));
+        assert(effective_stack[player] > 0);
+        bet_states[stage][player] += effective_stack[player];
+        effective_stack[player] = 0;
+
     } else if (move_type >= 1 && move_type <= 9 ) {
-        //BET
+        //Bet
         int bet_size = bet_sizings[move_type - 1] * pot;
+        assert(bet_size > 0);
 
         effective_stack[player] -= bet_size;
         bet_states[stage][player] = bet_size;
 
-        string move_string = to_string(player) + "B" + to_string(bet_size);
-        moveHistory.push(move_string);
+        moveHistory.push(to_string(player) + "B" + to_string(bet_size));
     } else if (move_type >= 13 && move_type <= 17) {
-        //RAISE
-        int raise_size = bet_states[stage][1-player] * raise_sizings[move_type - 13];
+        //Raise
+        int raise_size = bet_states[stage][1 - player] * raise_sizings[move_type - 13];
+        assert(raise_size > 0);
 
         int extra_chips = raise_size - bet_states[stage][player];
-        string move_string = to_string(player) + "R" + to_string(extra_chips);
-
         effective_stack[player] -= extra_chips;
         bet_states[stage][player] = raise_size;
 
-        moveHistory.push(move_string);
-
-        cout << "RAISE TO: " << raise_size;
+        moveHistory.push(to_string(player) + "B" + to_string(extra_chips));
     }
 
     if (update_stage) {
+        // Indicate new chance node and next stage
+        moveHistory.push("|");
         if (stage == 3) {
             terminal = true;
-            PrintGame();
             return;
         }
         player = first_to_act;
-        moveHistory.push("|");
     } else {
+        // Swap players
         player = 1 - player;
     }
-
-    PrintGame();
 }
 
 void Game::UnmakeMove() {
+    assert(!moveHistory.empty());
     terminal = false;
     string last_move = moveHistory.top();
-    
-    cout << last_move << "\n";
+
+    if (last_move[1] == 'F') {
+        moveHistory.pop();
+        player = last_move[0] - '0';
+        return;
+    } else if (last_move == "|") {
+        stage--;
+        assert(bet_states[stage][0] == bet_states[stage][1]);
+
+        // Update pot amount and get the next move before that
+        pot -= bet_states[stage][0] + bet_states[stage][1];
+        moveHistory.pop();
+        last_move = moveHistory.top();
+    }
+    assert(!moveHistory.empty());
+
+    moveHistory.pop();
+    player = last_move[0] - '0';
+    int bet_size = stoi(last_move.substr(2,last_move.length()-2));
+    bet_states[stage][player] -= bet_size;
+    effective_stack[player] += bet_size;
 }
 
-bool isNumber(const string& s) {
-    return !s.empty() && all_of(s.begin(), s.end(), ::isdigit);
-}
 
 
 

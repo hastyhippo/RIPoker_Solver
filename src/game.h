@@ -33,10 +33,10 @@ class Game {
 
         //Built
         void InitialiseGame(int OOP);
-        void PrintGame();
+        string PrintGame(bool print);
         
         // TODO
-        vector<bool> GetActions();
+        vector<bool> GetActions(bool print);
         void MakeMove(int move_type);
         void UnmakeMove();
 };
