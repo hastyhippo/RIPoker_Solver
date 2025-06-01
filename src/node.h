@@ -12,11 +12,12 @@ class Game;
 #include "game.h"
 class Node {
     private:
+    public:
+        vector<double> strategy;
         vector<double> strategy_sum;
         vector<double> regret_sum; 
         vector<bool> possible_actions;
-    public:
-        vector<double> strategy;
+
         Node(vector<bool> actions);
         Node();
 
@@ -27,4 +28,5 @@ class Node {
     static char GetBetAction(int pot, int bet_size);
     static char GetRaiseAction(int bet_size, int last_bet_size);
     static string GetHash(Game &g);
+    static void ReverseHash(const string& str);
 };

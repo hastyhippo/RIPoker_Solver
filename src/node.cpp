@@ -69,14 +69,19 @@ using namespace std;
 Node::Node(vector<bool> actions) {
     strategy_sum = vector<double>(NUM_ACTIONS, 0);
     regret_sum = vector<double>(NUM_ACTIONS, 0);
-    strategy = vector<double>(NUM_ACTIONS, 1/(double)NUM_ACTIONS);
+    strategy = vector<double>(NUM_ACTIONS, 0);
+
+    int n = 0; for (auto a : actions) if (a) n++;
+    for (int i = 0; i < NUM_ACTIONS; i++) {
+        if (actions[i]) strategy[i] = 1.0/(double)n;
+    }
     possible_actions = actions;
 }
 
 Node::Node() {
     strategy_sum = vector<double>(NUM_ACTIONS, 0);
     regret_sum = vector<double>(NUM_ACTIONS, 0);
-    strategy = vector<double>(NUM_ACTIONS, 1/(double)NUM_ACTIONS);
+    strategy = vector<double>(NUM_ACTIONS, 1.0/(double)NUM_ACTIONS);
 }
 
 char Node::GetBetAction(int pot, int bet_size) {
@@ -170,10 +175,53 @@ string Node::GetHash(Game &g) {
 
     bitset<18> hash_bits(hash);
     // cout << hash_bits;
-    string hash_string = to_string(hash) + "|";
+    string hash_string = to_string(hash) + "|" + g.abstractHistory;
     // cout << "\n Value: " <<  hash_string;
 
     return hash_string;
+}
+
+void Node::ReverseHash(const string& full_hash) {
+    size_t sep = full_hash.find("|");
+    if (sep == string::npos) {
+        cerr << "Invalid hash format.\n";
+        return;
+    }
+
+    uint32_t hash = stoi(full_hash.substr(0, sep));
+    string abstractHistory = full_hash.substr(sep + 1);
+
+    int handVal = hash & 0xF;            // bits 0-3
+    int board0Val = (hash >> 4) & 0xF;   // bits 4-7
+    int board1Val = (hash >> 8) & 0xF;   // bits 8-11
+    int flushInfo = (hash >> 12) & 0x3;  // bits 12-13
+    int sprCat = (hash >> 14) & 0x7;     // bits 14-16
+
+    bool isTurn = hash & TURN_MASK;
+    bool isFlop = hash & FLOP_MASK;
+
+    cout << "Parsed Hash Details:\n";
+    cout << "Hand Value: " << handVal << '\n';
+    cout << "Board[0] Value: " << board0Val << '\n';
+    cout << "Board[1] Value: " << board1Val << '\n';
+
+    if (isFlop && !isTurn)
+        cout << "Stage: FLOP\n";
+    else if (isTurn)
+        cout << "Stage: TURN\n";
+    else
+        cout << "Stage: UNKNOWN\n";
+
+    cout << "Flush Info: ";
+    switch (flushInfo) {
+        case 0: cout << "No flush\n"; break;
+        case 1: cout << "Bricked flush draw\n"; break;
+        case 2: cout << "Flush completes\n"; break;
+        case 3: cout << "Flush on board\n"; break;
+    }
+
+    cout << "SPR Category (encoded): " << sprCat << '\n';
+    cout << "Abstract History: " << abstractHistory << '\n';
 }
 
 void Node::UpdateRegret(vector<double> new_regret) {
@@ -191,10 +239,10 @@ void Node::UpdateStrategy() {
 
     if (normalising_sum == 0) {
         strategy = vector<double>(NUM_ACTIONS, 1.0/NUM_ACTIONS);
-    }
-
-    for (int i = 0; i < NUM_ACTIONS; i++) {
-        strategy[i] = max(0.0, regret_sum[i]/normalising_sum);
+    } else {
+        for (int i = 0; i < NUM_ACTIONS; i++) {
+            strategy[i] = max(0.0, regret_sum[i]/normalising_sum);
+        }
     }
 }
 

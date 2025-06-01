@@ -17,45 +17,23 @@ void CFRSolver::TrainCFR() {
     g.InitialiseGame(0);
 
     double ev = CFR(g, 1,1);
+    g.PrintGame(true);
     cout << "EV: " << ev<< "\n";
 }
 
-/*
-    Actions:
-    - X Check (0)
-    - 1 B20 (1)
-    - 2 B33 (2)
-    - 3 B50 (3)
-    - 4 B66 (4)
-    - 5 B80 (5)
-    - 6 B100 (6)
-    - 7 B150 (7)
-    - 8 B200 (8)
-    - 9 B300 (9)
-    - A ALLIN (10)
-
-    Against a Bet:
-    - F Fold (11)
-    - C Call (12)
-    - 1 R 2.2x (13)
-    - 2 R 2.6x (14)
-    - 3 R 3x (15)
-    - 4 R 3.6x (16)
-    - 5 R 4.5x (17)
-    - A R ALLIN (18)
-*/ 
-
-Node& CFRSolver::GetNode(string hash) {
+Node *CFRSolver::GetNode(string hash) {
     if(positionMap.count(hash) == 0) {
-        Node newNode = Node();
-        positionMap[hash] = newNode;
+        Node *new_node = new Node();
+        positionMap.emplace(hash, new_node);
+        vector<double> strategy = new_node->strategy;
     } 
     return positionMap[hash];
 }
 
+
 // Only working for 2p 
 double CFRSolver::CFR(Game &g, double p1, double p2) {
-    g.PrintGame(true);
+    // g.PrintGame(true);
 
     if (g.terminal) {
         return g.GetUtility();
@@ -63,11 +41,20 @@ double CFRSolver::CFR(Game &g, double p1, double p2) {
     // next card if applicable
 
     // has the position properly
-    Node& currentNode = GetNode(Node::GetHash(g));
-    currentNode.UpdateStrategy();
-    vector<double> strategy = currentNode.strategy;
+    string hash = Node::GetHash(g);
+    Node *currentNode = GetNode(hash);
+    positionCount[hash]++;
+    
+    (*currentNode).UpdateStrategy();
+    vector<double> strategy = currentNode->strategy;
+
+    // cout << "RegretSum: ";
     // for (int i = 0; i < NUM_ACTIONS; i++) {
-    //     cout << strategy[i] << " | ";
+    //     cout << currentNode->regret_sum[i] << " | ";
+    // }
+    // cout << "\nStrategy: ";
+    // for (auto a : currentNode->strategy) {
+    //     cout << a << " | ";
     // }
     // cout << '\n';
 
@@ -75,26 +62,34 @@ double CFRSolver::CFR(Game &g, double p1, double p2) {
     double node_utility = 0;
 
     vector<bool> possible_actions = g.GetActions(false);
+
+    double normalising_sum = 0.0;
     for (int i = 0; i < NUM_ACTIONS; i++) {
-        // check if the move is valid
+        if (possible_actions[i]) normalising_sum += strategy[i];
+    }
+
+    for (int i = 0; i < NUM_ACTIONS; i++) {
+        // check if the move is vcalid
         if(!possible_actions[i]) continue;
+
+        double chance = strategy[i]/normalising_sum;
         
         // perform action
         g.MakeMove(i);
         if (g.player == 0) {
-            action_val[i] = -CFR(g, p1 * strategy[i], p2);
+            action_val[i] = -CFR(g, p1 * chance, p2);
         } else {
-            action_val[i] = -CFR(g, p1, p2 * strategy[i]);
+            action_val[i] = -CFR(g, p1, p2 * chance);
         }
         g.UnmakeMove();
-        node_utility += action_val[i] * strategy[i];
+        node_utility += action_val[i] * chance;
     }
 
     vector<double> regrets(NUM_ACTIONS);
     for (int i = 0; i < NUM_ACTIONS; i++) {
         if(possible_actions[i]) regrets[i] = action_val[i] - node_utility;
     }
-    currentNode.UpdateRegret(regrets);
-
+    (*currentNode).UpdateRegret(regrets);
+    // cout << "\nEV: " << node_utility;
     return node_utility;
 }
