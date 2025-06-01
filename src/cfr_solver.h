@@ -7,7 +7,7 @@
 #include <vector>
 #include <map>
 #include <cstdint>
-
+#include <unordered_map>
 #include "node.h"
 
 class Game;
@@ -17,12 +17,13 @@ using namespace std;
 
 class CFRSolver {
     private:
-        map<string, Node> positionMap;
-
     public: 
-        CFRSolver(int num_players);
-        int getAction(string s);
-        Node getNode(string history);
-        void TrainCFR(CFRSolver cfr);
+        unordered_map<string, Node*> positionMap;
+        unordered_map<string, int> positionCount;
+
+        CFRSolver();
+        Node *GetNode(string hash);
+        void TrainCFR();
+        double CFR(Game &g, double p1, double p2);
 
 };

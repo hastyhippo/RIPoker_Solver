@@ -14,29 +14,32 @@ class Game {
     private:
 
     public:
-        Game(int starting_stack);
+        
         int first_to_act;
         int player; // 0 or 1
         int stage;
+        bool terminal;
+
         vector<int> effective_stack;
         vector<int> chips;
         vector<vector<int>> bet_states;
+
         int pot;
         Deck deck;
         vector<Card> hands;
         vector<Card> board;
-
-        stack<string> moveHistory;
+        vector<string> moveHistory;
 
         string history;
-        bool terminal;
+        string abstractHistory;
 
         //Built
+        Game(int starting_stack);
         void InitialiseGame(int OOP);
         string PrintGame(bool print);
-        
-        // TODO
         vector<bool> GetActions(bool print);
         void MakeMove(int move_type);
         void UnmakeMove();
+        // Gets utility for the player it is to act
+        int GetUtility();
 };
