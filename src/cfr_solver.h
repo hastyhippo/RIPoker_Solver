@@ -21,8 +21,8 @@ class CFRSolver {
 
     public: 
         CFRSolver(int num_players);
-        int getAction(string s);
-        Node getNode(string history);
-        void TrainCFR(CFRSolver cfr);
+        Node& GetNode(string hash);
+        void TrainCFR();
+        double CFR(Game &g, double p1, double p2);
 
 };

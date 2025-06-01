@@ -8,22 +8,23 @@
 
 using namespace std;
 
+class Game;
 #include "game.h"
 class Node {
     private:
-        string positionHash;
         vector<double> strategy_sum;
         vector<double> regret_sum; 
+        vector<bool> possible_actions;
     public:
         vector<double> strategy;
-
+        Node(vector<bool> actions);
         Node();
+
         void UpdateStrategy();
         void UpdateRegret(vector<double> new_regret);
         vector<double> GetFinalStrategy();
-        
-    
-    static char GetAction(int pot, int bet_size, int flag);
-    static char GetAction(int bet_size, int last_bet_size);
-    static string GetHash(int stage, bool can_raise, double spr, string game_history, Card hole, Card board1, Card board2);
+
+    static char GetBetAction(int pot, int bet_size);
+    static char GetRaiseAction(int bet_size, int last_bet_size);
+    static string GetHash(Game &g);
 };
