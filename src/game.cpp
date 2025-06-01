@@ -17,35 +17,11 @@ vector<double> bet_sizings = {0.33, 0.66, 1, 1.5, 2, 3};
 vector<double> raise_sizings = {2.2, 2.6, 3, 4};
 // vector<string> move_names = {"Check", "B20", "B33", "B50", "B66", "B80", "B100", "B150", "B200", "B300", "BALL",
 // "FOLD", "CALL", "R2.2", "R2.6", "R3", "R3.6", "R4.5", "RALL"};
-vector<string> move_names = {"Check", "Fold", "Call", "Allin", "B33", "B66", "B100", "B150", "B200", "B300", "R2.2", "R2.6", "R3", "R4"};
+vector<string> move_names = {"Check", "Call", "Fold", "Allin", "B33", "B66", "B100", "B150", "B200", "B300", "R2.2", "R2.6", "R3", "R4"};
 
 bool isNumber(const string& s) {
     return !s.empty() && all_of(s.begin(), s.end(), ::isdigit);
 }
-
-/*
-    Actions:
-    - X Check (0)
-    - F Fold (1)
-    - C Call (2)
-    - A ALLIN (3)
-    BETS
-    - B33 (NUM_MISC)
-    - B66 (.)
-    - B80 (.)
-    - B100 (.)
-    - B150 (.)
-    - B200 (.)
-    - B300 (.)
-
-    RAISE
-    - F Fold (NUM_MISC+NUM_BETS)
-    - C Call (.)
-    - 1 R 2.2x (.)
-    - 2 R 2.6x (.)
-    - 3 R 3x (.)
-    - 4 R 4x (.)
-*/
 
 
 Game::Game(int startingStack) {

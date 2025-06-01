@@ -17,41 +17,63 @@ void Initialise() {
 
 int main() {
     Initialise();    
-    // CFRSolver cfr;    
-    // cfr.TrainCFR();
-    Game g(STARTING_STACK);
-    g.InitialiseGame(0);
-    g.PrintGame(true);
-
-    // test_make_unmake(g);
-
-    while (!g.terminal) {
-        g.PrintGame(true);
-
-        vector<bool> possible_actions = g.GetActions(true);
-        test_make_unmake(g);
-
-        int action;
-        cin >> action;
-        if (action >= 0 && action <= 18 && !g.terminal && possible_actions[action]) {
-            g.MakeMove(action);
-        } else if (action == -1 && !g.moveHistory.empty()) {
-            g.UnmakeMove();
-        } else {
-            break;
-        }
-
-        g.PrintGame(true);
-        if(g.terminal) {
-            cout << "player " << g.player << " | UTILITY: " << g.GetUtility() << "\n";
-        }
-        // test_make_unmake(g);
-    }
-    for (auto s : g.moveHistory) {
-        cout << s << " ";
+    CFRSolver cfr;  
+    while(true) {
+        int iterations = 0;
+        cin >> iterations;
+        if (iterations > 0) {
+            while (iterations--) {
+                cfr.TrainCFR();
+            }
+        } else break; 
     }
 
-    return 0;
+    for (auto a : cfr.positionMap) {
+        if(cfr.positionCount[a.first] < 3) continue;
+        Node::ReverseHash(a.first);
+        cout << " | Count: " << cfr.positionCount[a.first] << "\n" ;
+        for (auto b : a.second->strategy) {
+            cout << b << " | ";
+        }
+        cout << "\n";
+        for (auto b : a.second->regret_sum) {
+            cout << b << " | ";
+        }
+        cout << "\n\n";
+    }
+    // Game g(STARTING_STACK);
+    // g.InitialiseGame(0);
+    // g.PrintGame(true);
+
+    // // test_make_unmake(g);
+
+    // while (!g.terminal) {
+    //     g.PrintGame(true);
+
+    //     vector<bool> possible_actions = g.GetActions(true);
+    //     test_make_unmake(g);
+
+    //     int action;
+    //     cin >> action;
+    //     if (action >= 0 && action <= 18 && !g.terminal && possible_actions[action]) {
+    //         g.MakeMove(action);
+    //     } else if (action == -1 && !g.moveHistory.empty()) {
+    //         g.UnmakeMove();
+    //     } else {
+    //         break;
+    //     }
+
+    //     g.PrintGame(true);
+    //     if(g.terminal) {
+    //         cout << "player " << g.player << " | UTILITY: " << g.GetUtility() << "\n";
+    //     }
+    //     // test_make_unmake(g);
+    // }
+    // for (auto s : g.moveHistory) {
+    //     cout << s << " ";
+    // }
+
+    // return 0;
 }
 
 // game.cpp make_move and unmake_move tests
@@ -85,6 +107,6 @@ void test_make_unmake(Game g) {
         }
         
     }
-
+    cout << "\n";
     return;
 }

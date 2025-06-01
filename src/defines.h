@@ -41,4 +41,28 @@
 #define FOLD 2
 #define ALLIN 3
 
-#define STARTING_STACK 100
+#define STARTING_STACK 20
+
+/*
+    Actions:
+    - X Check (0)
+    - F Fold (1)
+    - C Call (2)
+    - A ALLIN (3)
+    BETS
+    - B33 (NUM_MISC)
+    - B66 (.)
+    - B80 (.)
+    - B100 (.)
+    - B150 (.)
+    - B200 (.)
+    - B300 (.)
+
+    RAISE
+    - F Fold (NUM_MISC+NUM_BETS)
+    - C Call (.)
+    - 1 R 2.2x (.)
+    - 2 R 2.6x (.)
+    - 3 R 3x (.)
+    - 4 R 4x (.)
+*/
