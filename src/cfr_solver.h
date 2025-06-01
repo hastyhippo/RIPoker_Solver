@@ -20,7 +20,7 @@ class CFRSolver {
         map<string, Node> positionMap;
 
     public: 
-        CFRSolver(int num_players);
+        CFRSolver();
         Node& GetNode(string hash);
         void TrainCFR();
         double CFR(Game &g, double p1, double p2);

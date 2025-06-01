@@ -4,8 +4,9 @@
 #include "game.h"
 
 #include "cassert"
+#include "defines.h"
+
 using namespace std;
-#define NUM_ACTIONS 19
 
 map<int,int> handStrengthMap;
 void test_make_unmake(Game g);
@@ -16,20 +17,19 @@ void Initialise() {
 
 int main() {
     Initialise();    
-    int starting_stack = 200;
-    CFRSolver cfr(starting_stack);    
+    // CFRSolver cfr;    
     // cfr.TrainCFR();
-    Game g(starting_stack);
+    Game g(STARTING_STACK);
     g.InitialiseGame(0);
     g.PrintGame(true);
 
-    test_make_unmake(g);
+    // test_make_unmake(g);
 
     while (!g.terminal) {
         g.PrintGame(true);
-    test_make_unmake(g);
 
         vector<bool> possible_actions = g.GetActions(true);
+        test_make_unmake(g);
 
         int action;
         cin >> action;
@@ -81,11 +81,10 @@ void test_make_unmake(Game g) {
                 cerr << str << "  \n -------------------------- \n" << str2 << '\n';
                 exit(0); 
             }
-            cout << " passed\n";
+            cout << " passed | ";
         }
         
     }
-    cout << "PASSED\n";
 
     return;
 }

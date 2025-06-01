@@ -10,21 +10,14 @@
 
 #include "node.h"
 #include "game.h"
-#define ANTE 1
-#define NUM_ACTIONS 19
-#define NUM_PLAYERS 2
-using namespace std;
+#include "defines.h"
 
-#define FOLD 11
-#define CALL 12
-#define CHECK 0
-#define ALLIN_BET 10
-#define ALLIN_RAISE 18
-
-vector<double> bet_sizings = {0.2, 0.33, 0.5, 0.66, 0.8, 1, 1.5, 2, 3};
-vector<double> raise_sizings = {2.2, 2.6, 3, 3.6, 4.5};
-vector<string> move_names = {"Check", "B20", "B33", "B50", "B66", "B80", "B100", "B150", "B200", "B300", "BALL",
-"FOLD", "CALL", "R2.2", "R2.6", "R3", "R3.6", "R4.5", "RALL"};
+vector<double> bet_sizings = {0.33, 0.66, 1, 1.5, 2, 3};
+// vector<double> bet_sizings = {0.2, 0.33, 0.5, 0.66, 0.8, 1, 1.5, 2, 3};
+vector<double> raise_sizings = {2.2, 2.6, 3, 4};
+// vector<string> move_names = {"Check", "B20", "B33", "B50", "B66", "B80", "B100", "B150", "B200", "B300", "BALL",
+// "FOLD", "CALL", "R2.2", "R2.6", "R3", "R3.6", "R4.5", "RALL"};
+vector<string> move_names = {"Check", "Fold", "Call", "Allin", "B33", "B66", "B100", "B150", "B200", "B300", "R2.2", "R2.6", "R3", "R4"};
 
 bool isNumber(const string& s) {
     return !s.empty() && all_of(s.begin(), s.end(), ::isdigit);
@@ -33,26 +26,25 @@ bool isNumber(const string& s) {
 /*
     Actions:
     - X Check (0)
-    - 1 B20 (1)
-    - 2 B33 (2)
-    - 3 B50 (3)
-    - 4 B66 (4)
-    - 5 B80 (5)
-    - 6 B100 (6)
-    - 7 B150 (7)
-    - 8 B200 (8)
-    - 9 B300 (9)
-    - A ALLIN (10)
+    - F Fold (1)
+    - C Call (2)
+    - A ALLIN (3)
+    BETS
+    - B33 (NUM_MISC)
+    - B66 (.)
+    - B80 (.)
+    - B100 (.)
+    - B150 (.)
+    - B200 (.)
+    - B300 (.)
 
-    Against a Bet:
-    - F Fold (11)
-    - C Call (12)
-    - 1 R 2.2x (13)
-    - 2 R 2.6x (14)
-    - 3 R 3x (15)
-    - 4 R 3.6x (16)
-    - 5 R 4.5x (17)
-    - A R ALLIN (18)
+    RAISE
+    - F Fold (NUM_MISC+NUM_BETS)
+    - C Call (.)
+    - 1 R 2.2x (.)
+    - 2 R 2.6x (.)
+    - 3 R 3x (.)
+    - 4 R 4x (.)
 */
 
 
@@ -165,8 +157,9 @@ vector<bool> Game::GetActions(bool print) {
         actions[CHECK] = true;
         unordered_map<int, int> values;
 
-        for (int i = 1; i <= 9; i++) {
-            int bet_size = pot * bet_sizings[i-1];
+        for (int dx = 0; dx <  NUM_BETS; dx++) {
+            int i = dx + MISC_ACTIONS;
+            int bet_size = pot * bet_sizings[dx];
             if (values.count(bet_size) == 0 && bet_size < effective_stack[player] && bet_size > 0) {
                 values[bet_size]++;
                 actions[i] = true;
@@ -174,7 +167,7 @@ vector<bool> Game::GetActions(bool print) {
         }
         // allin always available
         if(effective_stack[1 - player] > 0 && effective_stack[player] > 0) {
-            actions[ALLIN_BET] = true;
+            actions[ALLIN] = true;
         }    
     } else {
         // Facing a bet/raise - Fold/Call always available
@@ -183,15 +176,16 @@ vector<bool> Game::GetActions(bool print) {
 
         unordered_map<int, int> values;
 
-        for (int i = 13; i <= 17; i++) {
-            int raise_size = bet_states[stage][1 - player] * raise_sizings[i-13];
+        for (int dx = 0; dx < NUM_RAISES; dx++) {
+            int i = MISC_ACTIONS + NUM_BETS + dx;
+            int raise_size = bet_states[stage][1 - player] * raise_sizings[dx];
             if (values.count(raise_size) == 0 && raise_size < effective_stack[player] && raise_size > 0) {
                 values[raise_size]++;
                 actions[i] = true;
             }
         }
         if(effective_stack[1 - player] > 0 && effective_stack[player] > 0) {
-            actions[ALLIN_RAISE] = true;
+            actions[ALLIN] = true;
         }
     }
 
@@ -199,10 +193,10 @@ vector<bool> Game::GetActions(bool print) {
         for (int i = 0; i < NUM_ACTIONS; i++) {
             if (actions[i]) {
                 cout << i << " | " << move_names[i];
-                if (i >= 1 && i <= 9) {
-                    cout << " : " << (int)(pot * bet_sizings[i-1]) << '\n';
-                } else if (i >= 13 && i <= 17) {
-                    cout << " : " << (int)(bet_states[stage][1 - player] * raise_sizings[i-13])  << '\n';
+                if (i >= MISC_ACTIONS && i < MISC_ACTIONS + NUM_BETS ) {
+                    cout << " : " << (int)(pot * bet_sizings[i-MISC_ACTIONS]) << '\n';
+                } else if (i >= MISC_ACTIONS + NUM_BETS && i < MISC_ACTIONS + NUM_BETS + NUM_RAISES) {
+                    cout << " : " << (int)(bet_states[stage][1 - player] * raise_sizings[i-(MISC_ACTIONS + NUM_BETS)])  << '\n';
                 } else {
                     cout << '\n';
                 }
@@ -254,7 +248,7 @@ void Game::MakeMove(int move_type) {
         if (effective_stack[0] == 0 && effective_stack[1] == 0) {
             terminal = true;
         }
-    } else if (move_type == ALLIN_BET || move_type == ALLIN_RAISE) {
+    } else if (move_type == ALLIN) {
         // equivalent of betting whole stack
         moveHistory.push_back(to_string(player) + "B" + to_string(effective_stack[player]));
         abstractHistory += 'a';
@@ -262,9 +256,9 @@ void Game::MakeMove(int move_type) {
         bet_states[stage][player] += effective_stack[player];
         effective_stack[player] = 0;
 
-    } else if (move_type >= 1 && move_type <= 9 ) {
+    } else if (move_type >= MISC_ACTIONS && move_type < MISC_ACTIONS + NUM_BETS) {
         //Bet
-        int bet_size = bet_sizings[move_type - 1] * pot;
+        int bet_size = bet_sizings[move_type - MISC_ACTIONS] * pot;
         assert(bet_size > 0);
 
         effective_stack[player] -= bet_size;
@@ -272,9 +266,9 @@ void Game::MakeMove(int move_type) {
 
         moveHistory.push_back(to_string(player) + "B" + to_string(bet_size));
         abstractHistory += Node::GetBetAction(pot, bet_size);
-    } else if (move_type >= 13 && move_type <= 17) {
+    } else if (move_type >= MISC_ACTIONS + NUM_BETS && move_type <= MISC_ACTIONS + NUM_BETS + NUM_RAISES) {
         //Raise
-        int raise_size = bet_states[stage][1 - player] * raise_sizings[move_type - 13];
+        int raise_size = bet_states[stage][1 - player] * raise_sizings[move_type - (MISC_ACTIONS + NUM_BETS)];
         assert(raise_size > 0);
 
         int extra_chips = raise_size - bet_states[stage][player];

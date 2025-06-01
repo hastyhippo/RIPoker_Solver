@@ -8,37 +8,8 @@
 #include <bitset>
 
 #include "node.h"
-
+#include "defines.h"
 using namespace std;
-#define CHECK 0
-#define FOLD 1
-
-#define PREFLOP 0
-#define FLOP 1
-#define TURN 2
-#define NUM_ACTIONS 19
-#define BET_1_MAX 0.5
-#define BET_2_MAX 0.4
-#define BET_3_MAX 0.6
-#define BET_4_MAX 0.85
-#define BET_5_MAX 1.1
-#define BET_6_MAX 1.5
-#define BET_7_MAX 2
-#define BET_8_MAX 3
-
-#define RAISE_A_MAX 2.4
-#define RAISE_B_MAX 2.8 
-#define RAISE_C_MAX 3.4 
-#define RAISE_D_MAX 4 
-#define RAISE_E_MAX 5  
-
-#define SPR_0_MAX 0.5
-#define SPR_1_MAX 1
-#define SPR_2_MAX 2
-#define SPR_3_MAX 4
-#define SPR_4_MAX 6
-#define SPR_5_MAX 10
-#define SPR_6_MAX 20
 
 /*
     string:
@@ -183,7 +154,7 @@ string Node::GetHash(Game &g) {
     double spr = g.effective_stack[player];
 
     hash |= getSPR(spr) << 14; 
-    cout << "SPR: " <<  spr << '\n';
+    // cout << "SPR: " <<  spr << '\n';
     if(g.stage == FLOP) {
         if (g.hands[player].getSuit() == g.board[0].getSuit()) hash |= (1 << 12);
     }
@@ -198,9 +169,9 @@ string Node::GetHash(Game &g) {
 
 
     bitset<18> hash_bits(hash);
-    cout << hash_bits;
+    // cout << hash_bits;
     string hash_string = to_string(hash) + "|";
-    cout << "\n Value: " <<  hash_string;
+    // cout << "\n Value: " <<  hash_string;
 
     return hash_string;
 }

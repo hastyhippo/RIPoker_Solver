@@ -7,16 +7,15 @@
 #include "cfr_solver.h"
 #include "node.h"
 #include "game.h"
-
-#define NUM_ACTIONS 18
-
-CFRSolver::CFRSolver(int num_players) {
+#include "defines.h"
+CFRSolver::CFRSolver() {
 
 }
 
 void CFRSolver::TrainCFR() {
-    Game g(200);
+    Game g(STARTING_STACK);
     g.InitialiseGame(0);
+
     double ev = CFR(g, 1,1);
     cout << "EV: " << ev<< "\n";
 }
@@ -50,9 +49,8 @@ Node& CFRSolver::GetNode(string hash) {
     if(positionMap.count(hash) == 0) {
         Node newNode = Node();
         positionMap[hash] = newNode;
-    } else {
-        return positionMap[hash];
-    }
+    } 
+    return positionMap[hash];
 }
 
 // Only working for 2p 
@@ -68,10 +66,10 @@ double CFRSolver::CFR(Game &g, double p1, double p2) {
     Node& currentNode = GetNode(Node::GetHash(g));
     currentNode.UpdateStrategy();
     vector<double> strategy = currentNode.strategy;
-    for (int i = 0; i < NUM_ACTIONS; i++) {
-        cout << strategy[i] << " | ";
-    }
-    cout << '\n';
+    // for (int i = 0; i < NUM_ACTIONS; i++) {
+    //     cout << strategy[i] << " | ";
+    // }
+    // cout << '\n';
 
     vector<double> action_val(NUM_ACTIONS);
     double node_utility = 0;
