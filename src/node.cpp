@@ -16,7 +16,7 @@ using namespace std;
 #define PREFLOP 0
 #define FLOP 1
 #define TURN 2
-#define NUM_ACTIONS 2.0
+#define NUM_ACTIONS 19
 #define BET_1_MAX 0.5
 #define BET_2_MAX 0.4
 #define BET_3_MAX 0.6
@@ -63,7 +63,7 @@ using namespace std;
 
     Betting sequence
     String:
-        '0' - Check/Call
+        '0' - Check
         '1' - min-25% 
         '2' - 25%->40%
         '3' - 40%->60%
@@ -74,6 +74,7 @@ using namespace std;
         '8' - 200%->300%
         '9' - 300%+
         'a' - allin
+        'b' - call
 
         'A' - raise 2x-2.4x
         'B' - raise 2.4x - 2.8x
@@ -94,20 +95,25 @@ using namespace std;
 #define FLUSH_MASK  0x000000000000110000
 #define SPR_MASK    0x000000000000001111
 
-Node::Node() {
-
+Node::Node(vector<bool> actions) {
+    strategy_sum = vector<double>(NUM_ACTIONS, 0);
+    regret_sum = vector<double>(NUM_ACTIONS, 0);
+    strategy = vector<double>(NUM_ACTIONS, 1/(double)NUM_ACTIONS);
+    possible_actions = actions;
 }
 
-char Node::GetAction(int pot, int bet_size, int flag) {
-    if (flag == CHECK) {
+Node::Node() {
+    strategy_sum = vector<double>(NUM_ACTIONS, 0);
+    regret_sum = vector<double>(NUM_ACTIONS, 0);
+    strategy = vector<double>(NUM_ACTIONS, 1/(double)NUM_ACTIONS);
+}
+
+char Node::GetBetAction(int pot, int bet_size) {
+    if (bet_size == 0) {
         //Check call
         return '0';
     } 
-    if (flag == FOLD) {
-        return 'f';
-    }
     double ratio = (double)bet_size / pot;
-    cout << "ratio: " << ratio << "\n";
     if (ratio < BET_1_MAX) {
         return '1';
     } else if (ratio < BET_2_MAX) {
@@ -130,7 +136,7 @@ char Node::GetAction(int pot, int bet_size, int flag) {
 }
 
 // RAISES ONLY
-char Node::GetAction(int bet_size, int last_bet_size) {
+char Node::GetRaiseAction(int bet_size, int last_bet_size) {
     double ratio = (double)bet_size / last_bet_size;
     if (ratio < RAISE_A_MAX) {
         return 'A';
@@ -166,30 +172,36 @@ int getSPR(double spr) {
     return 7;
 }
 
-string Node::GetHash(int stage, bool can_raise, double spr, string game_history, Card hole, Card board1, Card board2) {
+string Node::GetHash(Game &g) {
     uint32_t hash = 0;
-    hash |= hole.getValue() | (board1.getValue() << 4) | (board2.getValue() << 8);
-    if (stage == FLOP) hash |= FLOP_MASK | TURN_MASK;
-    if (stage == TURN) hash |= TURN_MASK;
+    int player = g.player;
+
+    hash |= g.hands[player].getValue() | (g.board[0].getValue() << 4) | (g.board[1].getValue() << 8);
+    if (g.stage == FLOP) hash |= FLOP_MASK | TURN_MASK;
+    if (g.stage == TURN) hash |= TURN_MASK;
+
+    double spr = g.effective_stack[player];
 
     hash |= getSPR(spr) << 14; 
     cout << "SPR: " <<  spr << '\n';
-    if(stage == FLOP) {
-        if (hole.getSuit() == board1.getSuit()) hash |= (1 << 12);
+    if(g.stage == FLOP) {
+        if (g.hands[player].getSuit() == g.board[0].getSuit()) hash |= (1 << 12);
     }
-    if(stage == TURN) {
+    if(g.stage == TURN) {
         //bricked flush draw
-        if ((hole.getSuit() == board1.getSuit()) && (board1.getSuit() != board2.getSuit())) hash |= (1 << 12);
+        if ((g.hands[player].getSuit() == g.board[0].getSuit()) && (g.board[0].getSuit() != g.board[1].getSuit())) hash |= (1 << 12);
         //flush completes
-        if ((hole.getSuit() == board1.getSuit()) && (board1.getSuit() == board2.getSuit())) hash |= (2 << 12);
+        if ((g.hands[player].getSuit() == g.board[0].getSuit()) && (g.board[0].getSuit() == g.board[1].getSuit())) hash |= (2 << 12);
         // flush on board
-        if ((hole.getSuit() != board1.getSuit()) && (board1.getSuit() == board2.getSuit())) hash |= (3 << 12);
+        if ((g.hands[player].getSuit() != g.board[0].getSuit()) && (g.board[0].getSuit() == g.board[1].getSuit())) hash |= (3 << 12);
     }
+
 
     bitset<18> hash_bits(hash);
     cout << hash_bits;
-    string hash_string = to_string(hash) + "|" + game_history;
+    string hash_string = to_string(hash) + "|";
     cout << "\n Value: " <<  hash_string;
+
     return hash_string;
 }
 
