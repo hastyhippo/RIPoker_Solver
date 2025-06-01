@@ -8,7 +8,8 @@
 #include <vector>
 using namespace std;
 
-#define NUM_CARDS 12
+#include "defines.h"
+
 vector<string> suitNames = {"Spades", "Clubs", "Diamonds", "Hearts"};
 vector<string> valueNames = {"2", "3", "4", "5", "6", "7", "8", "9", "T", "J", "Q", "K", "A"};
 vector<int> primeValue = {2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 43};
@@ -16,7 +17,7 @@ int hasFlush = 47;
 map<int, int> Card::handStrengthMap;
 
 Card::Card(int value){
-    if(value >= 52 || value < -1) {
+    if(value >= NUM_CARDS || value < -1) {
         cout << "Card value is out of bounds\n";
         exit(0);
     }
@@ -55,21 +56,21 @@ int Card::getStrength(Card c1, Card c2, Card c3) {
 void Card::initialiseMap(){
     int strength = 0;
     //Straight Flush
-    for (int i = NUM_CARDS - 2; i >=0; i--) {
+    for (int i = NUM_CARD_VALUES - 2; i >=0; i--) {
         Card::handStrengthMap[hasFlush * primeValue[i] * primeValue[i+1] * primeValue[i+2]] = strength++;
     }
     // Trips
-    for (int i = NUM_CARDS; i >= 0; i--) {
+    for (int i = NUM_CARD_VALUES; i >= 0; i--) {
         Card::handStrengthMap[primeValue[i] * primeValue[i] * primeValue[i]] = strength++;
     }
 
     // Straight
-    for (int i = NUM_CARDS - 2; i >= 0; i--) {
+    for (int i = NUM_CARD_VALUES - 2; i >= 0; i--) {
         Card::handStrengthMap[primeValue[i] * primeValue[i+1] * primeValue[i+2]] = strength++;
     }
 
     //Flush
-    for (int i = NUM_CARDS; i >= 0; i--) {
+    for (int i = NUM_CARD_VALUES; i >= 0; i--) {
         for (int j = i - 1; j >= 0; j--) {
             for (int k = j - 1; k >= 0; k--) {
                 if (Card::handStrengthMap.count(primeValue[i] * primeValue[j] * primeValue[k] * hasFlush) != 0) continue;
@@ -79,15 +80,15 @@ void Card::initialiseMap(){
     }
 
     //PAIR
-    for (int i = NUM_CARDS; i >= 0; i--) {
-        for (int j = NUM_CARDS; j >= 0; j--) {
+    for (int i = NUM_CARD_VALUES; i >= 0; i--) {
+        for (int j = NUM_CARD_VALUES; j >= 0; j--) {
             if (i == j) continue;
             Card::handStrengthMap[primeValue[i] * primeValue[i] * primeValue[j]] = strength++;
         }
     }
 
     //HIGH CARD
-    for (int i = NUM_CARDS; i >= 0; i--) {
+    for (int i = NUM_CARD_VALUES; i >= 0; i--) {
         for (int j = i - 1; j >= 0; j--) {
             for (int k = j - 1; k >= 0; k--) {
                 if (Card::handStrengthMap.count(primeValue[i] * primeValue[j] * primeValue[k]) != 0) continue;

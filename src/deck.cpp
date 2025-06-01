@@ -2,14 +2,15 @@
 #include <string>
 #include <cmath>
 #include <algorithm>
-#include "deck.h"
 #include <stack>
 #include <vector>
 #include <random>
 
+#include "defines.h"
+#include "deck.h"
+
 using namespace std;
 
-#define NUM_CARDS 24
 Deck::Deck() {
     vector<Card> v(NUM_CARDS);
     for (int i = 0; i < NUM_CARDS; i++) {
