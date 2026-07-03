@@ -12,12 +12,11 @@
 #include "game.h"
 #include "defines.h"
 
-vector<double> bet_sizings = {0.33, 0.66, 1, 1.5, 2, 3};
-// vector<double> bet_sizings = {0.2, 0.33, 0.5, 0.66, 0.8, 1, 1.5, 2, 3};
+// Reduced from the original 6-size grid ({0.33, 0.66, 1, 1.5, 2, 3}) to cut
+// down the branching factor (and resulting infoset explosion) of the game tree.
+vector<double> bet_sizings = {0.5, 1, 2};
 vector<double> raise_sizings = {2.2, 2.6, 3, 4};
-// vector<string> move_names = {"Check", "B20", "B33", "B50", "B66", "B80", "B100", "B150", "B200", "B300", "BALL",
-// "FOLD", "CALL", "R2.2", "R2.6", "R3", "R3.6", "R4.5", "RALL"};
-vector<string> move_names = {"Check", "Call", "Fold", "Allin", "B33", "B66", "B100", "B150", "B200", "B300", "R2.2", "R2.6", "R3", "R4"};
+vector<string> move_names = {"Check", "Call", "Fold", "Allin", "B50", "B100", "B200", "R2.2", "R2.6", "R3", "R4"};
 
 bool isNumber(const string& s) {
     return !s.empty() && all_of(s.begin(), s.end(), ::isdigit);
@@ -86,8 +85,7 @@ void Game::InitialiseGame(int OOP) {
     board[1] = deck.Draw();
 
     bet_states = {{0, 0}, {0,0}, {0,0}};
-    
-    cout << "Players ante " << ANTE << " chip/s each" << '\n';
+
     for (int i = 0; i < NUM_PLAYERS; i++) {
         effective_stack[i] -= ANTE;
         pot += ANTE;
@@ -155,7 +153,8 @@ vector<bool> Game::GetActions(bool print) {
         for (int dx = 0; dx < NUM_RAISES; dx++) {
             int i = MISC_ACTIONS + NUM_BETS + dx;
             int raise_size = bet_states[stage][1 - player] * raise_sizings[dx];
-            if (values.count(raise_size) == 0 && raise_size < effective_stack[player] && raise_size > 0) {
+            int extra_chips = raise_size - bet_states[stage][player];
+            if (values.count(raise_size) == 0 && extra_chips < effective_stack[player] && extra_chips > 0) {
                 values[raise_size]++;
                 actions[i] = true;
             }

@@ -5,75 +5,74 @@
 
 #include "cassert"
 #include "defines.h"
+#include "display.h"
+#include "interactive.h"
+#include "export.h"
 
 using namespace std;
 
-map<int,int> handStrengthMap;
 void test_make_unmake(Game g);
+
+namespace {
+    const long long PROGRESS_EVERY_N_HANDS = 100;
+    const long long EXPLOIT_EVERY_N_HANDS = 500;
+    const int EXPLOIT_SAMPLES = 200;
+    const int TOP_NODES_FOR_REPORT = 25;
+    const int MIN_VISITS_FOR_EXPORT = 5;
+    const char *EXPORT_PATH = "solver_export.json";
+}
 
 void Initialise() {
     Card::initialiseMap();
 }
 
 int main() {
-    Initialise();    
-    CFRSolver cfr;  
-    while(true) {
-        int iterations = 0;
-        cin >> iterations;
-        if (iterations > 0) {
-            while (iterations--) {
-                cfr.TrainCFR();
+    Initialise();
+    CFRSolver cfr;
+
+    // Regression guard: confirm MakeMove/UnmakeMove round-trip symmetry
+    // before spending any time training.
+    {
+        Game sanity(STARTING_STACK);
+        sanity.InitialiseGame(0);
+        test_make_unmake(sanity);
+    }
+
+    cout << "Enter number of hands to train (0 to stop training): ";
+    long long iterations = 0;
+    while (cin >> iterations && iterations > 0) {
+        for (long long i = 0; i < iterations; i++) {
+            cfr.TrainCFR();
+
+            if (cfr.iteration % PROGRESS_EVERY_N_HANDS == 0) {
+                Display::PrintTrainingProgress(i + 1, iterations, cfr.positionMap.size());
             }
-        } else break; 
+            if (cfr.iteration % EXPLOIT_EVERY_N_HANDS == 0) {
+                double exploitability = cfr.EstimateExploitability(EXPLOIT_SAMPLES);
+                Display::PrintExploitability(cfr.iteration, exploitability);
+            }
+        }
+        cout << "Enter number of hands to train (0 to stop training): ";
     }
 
-    for (auto a : cfr.positionMap) {
-        if(cfr.positionCount[a.first] < 3) continue;
-        Node::ReverseHash(a.first);
-        cout << " | Count: " << cfr.positionCount[a.first] << "\n" ;
-        for (auto b : a.second->strategy) {
-            cout << b << " | ";
-        }
-        cout << "\n";
-        for (auto b : a.second->regret_sum) {
-            cout << b << " | ";
-        }
-        cout << "\n\n";
+    Display::PrintPreflopStrategy(cfr);
+    Display::PrintFinalStrategyReport(cfr, TOP_NODES_FOR_REPORT);
+
+    Export::WriteSolverJSON(cfr, EXPORT_PATH, MIN_VISITS_FOR_EXPORT);
+    cout << "Exported solver data to " << EXPORT_PATH << " (open web/index.html to browse it)\n";
+
+    cout << "Play against the trained solver? (y/n): ";
+    char playAnswer = 'n';
+    cin >> playAnswer;
+    if (playAnswer == 'y' || playAnswer == 'Y') {
+        cout << "Play as player 0 (out of position) or player 1 (in position)? ";
+        int humanPlayer = 0;
+        cin >> humanPlayer;
+        if (humanPlayer != 0 && humanPlayer != 1) humanPlayer = 0;
+        PlayVsSolver(cfr, humanPlayer);
     }
-    // Game g(STARTING_STACK);
-    // g.InitialiseGame(0);
-    // g.PrintGame(true);
 
-    // // test_make_unmake(g);
-
-    // while (!g.terminal) {
-    //     g.PrintGame(true);
-
-    //     vector<bool> possible_actions = g.GetActions(true);
-    //     test_make_unmake(g);
-
-    //     int action;
-    //     cin >> action;
-    //     if (action >= 0 && action <= 18 && !g.terminal && possible_actions[action]) {
-    //         g.MakeMove(action);
-    //     } else if (action == -1 && !g.moveHistory.empty()) {
-    //         g.UnmakeMove();
-    //     } else {
-    //         break;
-    //     }
-
-    //     g.PrintGame(true);
-    //     if(g.terminal) {
-    //         cout << "player " << g.player << " | UTILITY: " << g.GetUtility() << "\n";
-    //     }
-    //     // test_make_unmake(g);
-    // }
-    // for (auto s : g.moveHistory) {
-    //     cout << s << " ";
-    // }
-
-    // return 0;
+    return 0;
 }
 
 // game.cpp make_move and unmake_move tests
@@ -89,24 +88,16 @@ void test_make_unmake(Game g) {
 
     vector<bool> possible_actions = g.GetActions(false);
     for (int i = 0; i < NUM_ACTIONS; i++) {
-
         if (possible_actions[i]) {
-            cout << "i: " << i;
             g.MakeMove(i);
-            //  g.PrintGame(true);
-
             g.UnmakeMove();
             string str2 = g.PrintGame(false);
 
             if (str != str2) {
                 cerr << "\n\nDIFFERENCE DETECTED: Problem with: " << i << " action \n\n";
                 cerr << str << "  \n -------------------------- \n" << str2 << '\n';
-                exit(0); 
+                exit(1);
             }
-            cout << " passed | ";
         }
-        
     }
-    cout << "\n";
-    return;
 }

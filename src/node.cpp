@@ -12,17 +12,16 @@
 using namespace std;
 
 /*
-    string:
-    0x111100000000000000 - Card Value
-        0->12 Value of card
-    0x000011111111000000 - Community Cards
-    0x000000000000110000 - Suits Connections
+    Hash bit layout (bits, low to high):
+      0-3   : hole card value
+      4-7   : board[0] value (only set once stage >= FLOP)
+      8-11  : board[1] value (only set once stage >= TURN)
+      12-13 : suit connection info
         0 -> All different
         1 -> 1 Board + Hole Card same (Flush Draw for flop, Brick for turn)
         2 -> 2 Board + Hole Card same (Flush complete)
         3 -> Board has same suits (Flush on board, no flush for you)
-    0x000000000000001111 - SPR 
-    1: Effective SPR (Stack: Pot) 
+      14-16 : SPR bucket (effective stack : pot)
         0 :  0 -> 0.5
         1 :  0.5 -> 1
         2 :  1 -> 2
@@ -31,11 +30,15 @@ using namespace std;
         5 :  6 -> 10
         6 :  10 -> 20
         7 :  20 +
+      17-18 : stage (PREFLOP/FLOP/TURN)
+
+    Board bits are only ever OR'd in once that street's card has actually been
+    dealt (stage-gated), so no information about undealt cards is ever encoded.
 
     Betting sequence
     String:
         '0' - Check
-        '1' - min-25% 
+        '1' - min-25%
         '2' - 25%->40%
         '3' - 40%->60%
         '4' - 60%->85%
@@ -55,18 +58,7 @@ using namespace std;
         'F' - 5x+
 */
 
-
-
-#define NO_FLOP 0x00001111
-#define NO_TURN 0x000000001111
-
-#define HOLE__MASK  0x111100000000000000
-#define FLOP_MASK   0x000011110000000000
-#define TURN_MASK   0x000000001111000000
-#define FLUSH_MASK  0x000000000000110000
-#define SPR_MASK    0x000000000000001111
-
-Node::Node(vector<bool> actions) {
+Node::Node(const vector<bool> &actions) {
     strategy_sum = vector<double>(NUM_ACTIONS, 0);
     regret_sum = vector<double>(NUM_ACTIONS, 0);
     strategy = vector<double>(NUM_ACTIONS, 0);
@@ -76,12 +68,6 @@ Node::Node(vector<bool> actions) {
         if (actions[i]) strategy[i] = 1.0/(double)n;
     }
     possible_actions = actions;
-}
-
-Node::Node() {
-    strategy_sum = vector<double>(NUM_ACTIONS, 0);
-    regret_sum = vector<double>(NUM_ACTIONS, 0);
-    strategy = vector<double>(NUM_ACTIONS, 1.0/(double)NUM_ACTIONS);
 }
 
 char Node::GetBetAction(int pot, int bet_size) {
@@ -152,18 +138,18 @@ string Node::GetHash(Game &g) {
     uint32_t hash = 0;
     int player = g.player;
 
-    hash |= g.hands[player].getValue() | (g.board[0].getValue() << 4) | (g.board[1].getValue() << 8);
-    if (g.stage == FLOP) hash |= FLOP_MASK | TURN_MASK;
-    if (g.stage == TURN) hash |= TURN_MASK;
+    // Bits 0-3: hole card value. Always known to the acting player.
+    hash |= g.hands[player].getValue();
 
-    double spr = g.effective_stack[player];
+    // Bits 4-7 / 8-11: board cards. Only OR'd in once that street's card has
+    // actually been dealt, so no future/undealt card ever leaks into the hash.
+    if (g.stage >= FLOP) hash |= (g.board[0].getValue() << 4);
+    if (g.stage >= TURN) hash |= (g.board[1].getValue() << 8);
 
-    hash |= getSPR(spr) << 14; 
-    // cout << "SPR: " <<  spr << '\n';
-    if(g.stage == FLOP) {
+    // Bits 12-13: suit connection info (only meaningful once relevant cards are dealt).
+    if (g.stage == FLOP) {
         if (g.hands[player].getSuit() == g.board[0].getSuit()) hash |= (1 << 12);
-    }
-    if(g.stage == TURN) {
+    } else if (g.stage == TURN) {
         //bricked flush draw
         if ((g.hands[player].getSuit() == g.board[0].getSuit()) && (g.board[0].getSuit() != g.board[1].getSuit())) hash |= (1 << 12);
         //flush completes
@@ -172,86 +158,94 @@ string Node::GetHash(Game &g) {
         if ((g.hands[player].getSuit() != g.board[0].getSuit()) && (g.board[0].getSuit() == g.board[1].getSuit())) hash |= (3 << 12);
     }
 
+    // Bits 14-16: SPR bucket (effective stack : pot ratio).
+    double spr = (double)g.effective_stack[player] / (double)max(g.pot, 1);
+    hash |= (uint32_t)getSPR(spr) << 14;
 
-    bitset<18> hash_bits(hash);
-    // cout << hash_bits;
-    string hash_string = to_string(hash) + "|" + g.abstractHistory;
-    // cout << "\n Value: " <<  hash_string;
+    // Bits 17-18: stage, tagged explicitly so it can always be recovered reliably.
+    hash |= (uint32_t)g.stage << 17;
 
-    return hash_string;
+    return to_string(hash) + "|" + g.abstractHistory;
 }
 
-void Node::ReverseHash(const string& full_hash) {
+ParsedHash Node::ParseHash(const string& full_hash) {
     size_t sep = full_hash.find("|");
+    ParsedHash parsed{};
     if (sep == string::npos) {
         cerr << "Invalid hash format.\n";
-        return;
+        return parsed;
     }
 
-    uint32_t hash = stoi(full_hash.substr(0, sep));
-    string abstractHistory = full_hash.substr(sep + 1);
+    uint32_t hash = (uint32_t)stoul(full_hash.substr(0, sep));
 
-    int handVal = hash & 0xF;            // bits 0-3
-    int board0Val = (hash >> 4) & 0xF;   // bits 4-7
-    int board1Val = (hash >> 8) & 0xF;   // bits 8-11
-    int flushInfo = (hash >> 12) & 0x3;  // bits 12-13
-    int sprCat = (hash >> 14) & 0x7;     // bits 14-16
+    parsed.handVal = hash & 0xF;              // bits 0-3
+    parsed.board0Val = (hash >> 4) & 0xF;      // bits 4-7
+    parsed.board1Val = (hash >> 8) & 0xF;      // bits 8-11
+    parsed.flushInfo = (hash >> 12) & 0x3;     // bits 12-13
+    parsed.sprCat = (hash >> 14) & 0x7;        // bits 14-16
+    parsed.stage = (hash >> 17) & 0x3;         // bits 17-18
+    parsed.abstractHistory = full_hash.substr(sep + 1);
 
-    bool isTurn = hash & TURN_MASK;
-    bool isFlop = hash & FLOP_MASK;
-
-    cout << "Parsed Hash Details:\n";
-    cout << "Hand Value: " << handVal << '\n';
-    cout << "Board[0] Value: " << board0Val << '\n';
-    cout << "Board[1] Value: " << board1Val << '\n';
-
-    if (isFlop && !isTurn)
-        cout << "Stage: FLOP\n";
-    else if (isTurn)
-        cout << "Stage: TURN\n";
-    else
-        cout << "Stage: UNKNOWN\n";
-
-    cout << "Flush Info: ";
-    switch (flushInfo) {
-        case 0: cout << "No flush\n"; break;
-        case 1: cout << "Bricked flush draw\n"; break;
-        case 2: cout << "Flush completes\n"; break;
-        case 3: cout << "Flush on board\n"; break;
-    }
-
-    cout << "SPR Category (encoded): " << sprCat << '\n';
-    cout << "Abstract History: " << abstractHistory << '\n';
+    return parsed;
 }
 
-void Node::UpdateRegret(vector<double> new_regret) {
+void Node::UpdateRegret(const vector<double> &new_regret, const vector<bool> &possible_actions, double opp_reach, double own_reach, long long iteration) {
     for (int i = 0; i < NUM_ACTIONS; i++) {
-        regret_sum[i] += new_regret[i];
-        strategy_sum[i] += strategy[i];
+        if (!possible_actions[i]) continue;
+        // Counterfactual regret: weighted by the probability the OPPONENT
+        // (not the acting player) contributed to reaching this node.
+        regret_sum[i] += opp_reach * new_regret[i];
+        // CFR+-style flooring: clamp accumulated regret to zero immediately,
+        // not just when strategy is derived from it.
+        regret_sum[i] = max(0.0, regret_sum[i]);
+        // Linear-CFR averaging: weight this iteration's contribution to the
+        // running average strategy by both the iteration number and the
+        // acting player's own reach probability.
+        strategy_sum[i] += (double)iteration * own_reach * strategy[i];
     }
 }
 
-void Node::UpdateStrategy() {
+void Node::UpdateStrategy(const vector<bool> &possible_actions) {
     double normalising_sum = 0;
     for (int i = 0; i < NUM_ACTIONS; i++) {
+        if (!possible_actions[i]) continue;
         normalising_sum += max(0.0, regret_sum[i]);
     }
 
-    if (normalising_sum == 0) {
-        strategy = vector<double>(NUM_ACTIONS, 1.0/NUM_ACTIONS);
-    } else {
-        for (int i = 0; i < NUM_ACTIONS; i++) {
-            strategy[i] = max(0.0, regret_sum[i]/normalising_sum);
-        }
+    int n = 0;
+    for (int i = 0; i < NUM_ACTIONS; i++) if (possible_actions[i]) n++;
+
+    // strategy[] is fully recomputed (zeroed for non-legal indices) every
+    // call, so it always corresponds exactly to THIS call's possible_actions
+    // - it never carries over mass from a different legal-action set.
+    for (int i = 0; i < NUM_ACTIONS; i++) {
+        if (!possible_actions[i]) { strategy[i] = 0.0; continue; }
+        strategy[i] = (normalising_sum == 0) ? 1.0 / (double)n : max(0.0, regret_sum[i] / normalising_sum);
     }
 }
 
-vector<double> Node::GetFinalStrategy() {
-    vector<double> final_strategy(NUM_ACTIONS);
+vector<double> Node::GetFinalStrategy(const vector<bool> &possible_actions) {
+    vector<double> final_strategy(NUM_ACTIONS, 0.0);
     double normalising_sum = 0.0;
-    for (auto a : strategy_sum) normalising_sum += a;
     for (int i = 0; i < NUM_ACTIONS; i++) {
-        final_strategy[i] = strategy_sum[i] / normalising_sum;
+        if (possible_actions[i]) normalising_sum += max(0.0, strategy_sum[i]);
+    }
+
+    int n = 0;
+    for (int i = 0; i < NUM_ACTIONS; i++) if (possible_actions[i]) n++;
+    if (n == 0) return final_strategy; // no legal actions at all - shouldn't happen, but stay safe
+
+    if (normalising_sum <= 0.0) {
+        // No accumulated weight yet (e.g. a freshly-created or rarely-visited
+        // node) - fall back to uniform over legal actions rather than NaN.
+        for (int i = 0; i < NUM_ACTIONS; i++) {
+            final_strategy[i] = possible_actions[i] ? 1.0 / (double)n : 0.0;
+        }
+        return final_strategy;
+    }
+
+    for (int i = 0; i < NUM_ACTIONS; i++) {
+        final_strategy[i] = possible_actions[i] ? max(0.0, strategy_sum[i]) / normalising_sum : 0.0;
     }
     return final_strategy;
 }

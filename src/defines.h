@@ -6,7 +6,7 @@
 #define NUM_CARD_VALUES 12
 
 #define BET_1_MAX 0.5
-#define BET_2_MAX 0.4
+#define BET_2_MAX 0.55
 #define BET_3_MAX 0.6
 #define BET_4_MAX 0.85
 #define BET_5_MAX 1.1
@@ -29,9 +29,9 @@
 #define SPR_6_MAX 20
 
 #define ANTE 1
-#define NUM_ACTIONS 14
+#define NUM_ACTIONS 11
 #define MISC_ACTIONS 4
-#define NUM_BETS 6 
+#define NUM_BETS 3
 #define NUM_RAISES 4
 
 #define NUM_PLAYERS 2
@@ -46,23 +46,17 @@
 /*
     Actions:
     - X Check (0)
-    - F Fold (1)
-    - C Call (2)
+    - C Call (1)
+    - F Fold (2)
     - A ALLIN (3)
-    BETS
-    - B33 (NUM_MISC)
-    - B66 (.)
-    - B80 (.)
-    - B100 (.)
-    - B150 (.)
-    - B200 (.)
-    - B300 (.)
+    BETS (indices MISC_ACTIONS .. MISC_ACTIONS+NUM_BETS-1)
+    - B50  (half pot)
+    - B100 (pot)
+    - B200 (2x pot)
 
-    RAISE
-    - F Fold (NUM_MISC+NUM_BETS)
-    - C Call (.)
-    - 1 R 2.2x (.)
-    - 2 R 2.6x (.)
-    - 3 R 3x (.)
-    - 4 R 4x (.)
+    RAISE (indices MISC_ACTIONS+NUM_BETS .. MISC_ACTIONS+NUM_BETS+NUM_RAISES-1)
+    - R2.2x
+    - R2.6x
+    - R3x
+    - R4x
 */

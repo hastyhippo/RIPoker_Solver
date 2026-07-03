@@ -10,6 +10,11 @@ class CFRSolver;
 #include "deck.h"
 #include "cfr_solver.h"
 using namespace std;
+
+extern vector<double> bet_sizings;
+extern vector<double> raise_sizings;
+extern vector<string> move_names;
+
 class Game {
     private:
 
