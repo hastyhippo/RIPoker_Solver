@@ -51,41 +51,122 @@
 
 * { box-sizing: border-box; }
 
+html, body {
+  height: 100%;
+}
+
 body {
   margin: 0;
   background: var(--page);
   color: var(--text-primary);
   font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  overflow: hidden; /* fixed-size screen, no page scroll */
 }
 
+/* ------- App shell: fixed viewport, vertical stack ------- */
 #app {
-  max-width: 760px;
-  margin: 0 auto;
-  padding: 24px 20px 60px;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
 }
 
-h1 { font-size: 20px; margin: 0 0 4px; }
-.subtitle { color: var(--text-secondary); margin: 0 0 20px; }
-
-.panel {
+/* ------- Top banner ------- */
+.banner {
+  display: flex;
+  align-items: stretch;
+  gap: 14px;
   background: var(--surface-1);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 16px 20px;
-  margin-bottom: 16px;
-}
-.panel .panel-title {
-  font-weight: 600;
-  margin-bottom: 10px;
+  border-radius: 12px;
+  padding: 10px 16px;
+  flex: 0 0 auto;
 }
 
-.row {
+.brand {
   display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding-right: 14px;
+  border-right: 1px solid var(--border);
+}
+.brand h1 { font-size: 18px; margin: 0; white-space: nowrap; }
+.brand-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.banner-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-right: 14px;
+  border-right: 1px solid var(--border);
+}
+.banner-group:last-child { border-right: none; padding-right: 0; }
+/* Training sits at the far right of the banner */
+.training-group { margin-left: auto; }
+
+.group-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+.group-body {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* ------- Position bubble ------- */
+.position-bubble {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 16px;
+  flex: 0 0 auto;
+}
+.bubble-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+.bubble-body {
+  display: flex;
+  align-items: flex-end;
   flex-wrap: wrap;
   gap: 10px;
-  align-items: center;
 }
 
+/* ------- Strategy panel: fills the rest, scrolls internally ------- */
+.strategy-panel {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 20px;
+  flex: 1 1 auto;
+  min-height: 0;       /* allow the flex child to shrink so overflow works */
+  overflow-y: auto;
+}
+.strategy-panel .panel-title {
+  font-weight: 600;
+  margin-bottom: 10px;
+  position: sticky;
+  top: 0;
+  background: var(--surface-1);
+  padding-bottom: 4px;
+}
+
+/* ------- Shared form controls ------- */
 label.field {
   display: flex;
   flex-direction: column;
@@ -100,9 +181,9 @@ label.field input {
   border-radius: 6px;
   background: var(--page);
   color: var(--text-primary);
-  width: 110px;
+  width: 90px;
 }
-label.field input.wide { width: 180px; }
+label.field input.wide { width: 160px; }
 
 label.field-checkbox {
   display: flex;
@@ -110,11 +191,8 @@ label.field-checkbox {
   gap: 6px;
   font-size: 12px;
   color: var(--text-secondary);
-  align-self: flex-end;
   padding-bottom: 7px;
-}
-label.field-checkbox .hint {
-  color: var(--text-muted);
+  white-space: nowrap;
 }
 
 button.primary, button.secondary {
@@ -123,7 +201,6 @@ button.primary, button.secondary {
   border-radius: 6px;
   cursor: pointer;
   border: 1px solid var(--border);
-  align-self: flex-end;
 }
 button.primary {
   background: var(--accent);
@@ -139,20 +216,25 @@ button.secondary:hover { background: var(--gridline); }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .status {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-secondary);
-  margin-top: 8px;
-  min-height: 16px;
+  align-self: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 260px;
 }
+.status:empty { display: none; }
 .status.error { color: var(--status-error); }
 .status.ok { color: var(--status-ok); }
 
 .progress-track {
   height: 8px;
+  width: 120px;
   border-radius: 4px;
   background: var(--gridline);
   overflow: hidden;
-  margin-top: 10px;
+  align-self: center;
 }
 .progress-fill {
   height: 100%;
@@ -161,6 +243,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   transition: width 0.15s ease;
 }
 
+/* ------- Strategy content ------- */
 .legend {
   display: flex;
   flex-wrap: wrap;
