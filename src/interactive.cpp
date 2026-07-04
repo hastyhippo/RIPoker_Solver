@@ -51,7 +51,7 @@ void PlayVsSolver(CFRSolver &cfr, int humanPlayer) {
     mt19937 rng(rd());
 
     while (true) {
-        Game g(STARTING_STACK);
+        Game g(STARTING_STACK, STARTING_STACK, false);
         g.InitialiseGame(0);
         Display::PrintBoard(g, humanPlayer);
 
@@ -70,7 +70,7 @@ void PlayVsSolver(CFRSolver &cfr, int humanPlayer) {
             } else {
                 Display::PrintOptimalStrategy(strat, possible_actions, false);
                 move = SampleAction(strat, possible_actions, rng);
-                cout << "Opponent " << move_names[move] << "s.\n";
+                cout << "Opponent plays: " << Display::ActionDisplayLabel(move_names[move]) << "\n";
             }
 
             g.MakeMove(move);

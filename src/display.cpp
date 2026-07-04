@@ -24,6 +24,23 @@ namespace {
     const string RED      = "\033[31m";
     const string BLUE     = "\033[34m";
 
+    // move_names' raw entries ("B50", "R2.2", ...) are used as stable keys
+    // elsewhere (the web viewers key colors off these exact strings), so
+    // rather than rename them, translate to a clearer label only where text
+    // is actually shown to a user - spelling out the ratio instead of the
+    // abbreviated code.
+    string DisplayLabel(const string &moveName) {
+        if (moveName == "B50") return "Bet 50%";
+        if (moveName == "B100") return "Bet 100%";
+        if (moveName == "B200") return "Bet 200%";
+        if (moveName == "R2.2") return "Raise 2.2x";
+        if (moveName == "R2.6") return "Raise 2.6x";
+        if (moveName == "R3") return "Raise 3x";
+        if (moveName == "R4") return "Raise 4x";
+        if (moveName == "Allin") return "All-in";
+        return moveName; // Check, Call, Fold
+    }
+
     string RankName(int value) {
         // Reuses Card::getName() (suit 0 = Spades) so labelling stays
         // consistent with the rest of the codebase, then strips the suit.
@@ -109,21 +126,32 @@ namespace {
     }
 
     // Expands the compact abstractHistory code (e.g. "07AA,0") into a full,
-    // street-by-street, human-readable action sequence.
+    // street-by-street, human-readable action sequence. Handles both the
+    // bucketed single-character alphabet and the exact-bet-sizing tokens
+    // ("[N]" for a bet of exactly N chips, "{N}" for a raise to exactly N).
     string DecodeAbstractHistory(const string &hist) {
         if (hist.empty()) return "(no actions yet this street)";
 
         static const vector<string> streetNames = {"Preflop", "Flop", "Turn"};
         vector<string> streets;
         string current;
-        for (char c : hist) {
+        for (size_t i = 0; i < hist.size(); i++) {
+            char c = hist[i];
             if (c == ',') {
                 streets.push_back(current);
                 current.clear();
                 continue;
             }
             if (!current.empty()) current += " -> ";
-            current += ActionLetterName(c);
+            if (c == '[' || c == '{') {
+                char close = (c == '[') ? ']' : '}';
+                size_t end = hist.find(close, i + 1);
+                string amount = (end == string::npos) ? hist.substr(i + 1) : hist.substr(i + 1, end - i - 1);
+                current += (c == '[' ? "Bet " : "Raise to ") + amount + " chips (exact)";
+                i = (end == string::npos) ? hist.size() - 1 : end;
+            } else {
+                current += ActionLetterName(c);
+            }
         }
         streets.push_back(current);
 
@@ -173,7 +201,7 @@ void PrintFinalStrategyReport(CFRSolver &cfr, int topN) {
         if (p.stage >= FLOP) cout << BOLD << "  Board: " << RESET << RankName(p.board0Val);
         if (p.stage >= TURN) cout << " " << RankName(p.board1Val);
         cout << DIM << "  [Stage: " << StageName(p.stage) << ", Flush: " << FlushInfoName(p.flushInfo)
-             << ", SPR bucket: " << p.sprCat << "]" << RESET << "\n";
+             << ", Pot: " << p.pot << ", To call: " << p.bet << "]" << RESET << "\n";
         cout << DIM << "Raw history code: " << (p.abstractHistory.empty() ? "(none)" : p.abstractHistory)
              << "  |  visits: " << cfr.positionCount[hash] << RESET << "\n";
         cout << DIM << "Action sequence: " << RESET << DecodeAbstractHistory(p.abstractHistory) << "\n";
@@ -188,7 +216,7 @@ void PrintFinalStrategyReport(CFRSolver &cfr, int topN) {
         });
 
         for (auto &a : actions) {
-            cout << "  " << setw(6) << left << move_names[a.first] << RESET
+            cout << "  " << setw(12) << left << DisplayLabel(move_names[a.first]) << RESET
                  << GREEN << BlockBar(a.second) << RESET
                  << "  " << fixed << setprecision(1) << (a.second * 100.0) << "%\n";
         }
@@ -203,8 +231,8 @@ void PrintPreflopStrategy(CFRSolver &cfr) {
     cout << BOLD << YELLOW << Line() << RESET << "\n";
 
     // One slot per hole card value; keep whichever node (there should only
-    // ever be one) has the most visits in case the SPR abstraction ever
-    // splits the opening decision across buckets.
+    // ever be one at a fixed starting stack) has the most visits, defensively
+    // in case the money-state key ever splits the opening decision.
     int numHandValues = NUM_CARDS / 4;
     vector<pair<string, Node*>> best(numHandValues, {"", nullptr});
 
@@ -224,7 +252,7 @@ void PrintPreflopStrategy(CFRSolver &cfr) {
         ParsedHash p = Node::ParseHash(hash);
 
         cout << "\n" << BOLD << CYAN << "Hand: " << RESET << RankName(handVal)
-             << DIM << "  [Stage: " << StageName(p.stage) << ", SPR bucket: " << p.sprCat << "]"
+             << DIM << "  [Stage: " << StageName(p.stage) << ", Pot: " << p.pot << ", To call: " << p.bet << "]"
              << "  |  visits: " << cfr.positionCount[hash] << RESET << "\n";
         cout << DIM << "Action sequence: " << RESET << DecodeAbstractHistory(p.abstractHistory) << "\n";
 
@@ -238,7 +266,7 @@ void PrintPreflopStrategy(CFRSolver &cfr) {
         });
 
         for (auto &a : actions) {
-            cout << "  " << setw(6) << left << move_names[a.first] << RESET
+            cout << "  " << setw(12) << left << DisplayLabel(move_names[a.first]) << RESET
                  << GREEN << BlockBar(a.second) << RESET
                  << "  " << fixed << setprecision(1) << (a.second * 100.0) << "%\n";
         }
@@ -267,12 +295,20 @@ void PrintActionMenu(const vector<bool> &actions, Game &g) {
     cout << YELLOW << "Available actions:" << RESET << "\n";
     for (int i = 0; i < NUM_ACTIONS; i++) {
         if (!actions[i]) continue;
-        cout << "  " << BOLD << i << RESET << ") " << move_names[i];
+        cout << "  " << BOLD << i << RESET << ") ";
+        // Leads with the exact chip amount here (unlike the aggregate
+        // strategy reports, which have no single pot to compute one from) -
+        // more directly useful than the abstracted "B200"-style label when
+        // there's a real, current pot to size against.
         if (i >= MISC_ACTIONS && i < MISC_ACTIONS + NUM_BETS) {
-            cout << DIM << "  (" << (int)(g.pot * bet_sizings[i - MISC_ACTIONS]) << " chips)" << RESET;
+            cout << "Bet " << (int)(g.pot * bet_sizings[i - MISC_ACTIONS]) << " chips"
+                 << DIM << "  (" << DisplayLabel(move_names[i]) << ")" << RESET;
         } else if (i >= MISC_ACTIONS + NUM_BETS && i < MISC_ACTIONS + NUM_BETS + NUM_RAISES) {
             int target = (int)(g.bet_states[g.stage][1 - g.player] * raise_sizings[i - (MISC_ACTIONS + NUM_BETS)]);
-            cout << DIM << "  (to " << target << " chips)" << RESET;
+            cout << "Raise to " << target << " chips"
+                 << DIM << "  (" << DisplayLabel(move_names[i]) << ")" << RESET;
+        } else {
+            cout << DisplayLabel(move_names[i]);
         }
         cout << "\n";
     }
@@ -297,10 +333,14 @@ void PrintOptimalStrategy(const vector<double> &strategy, const vector<bool> &po
     });
 
     for (auto &a : actions) {
-        cout << "  " << setw(6) << left << move_names[a.first] << RESET
+        cout << "  " << setw(12) << left << DisplayLabel(move_names[a.first]) << RESET
              << GREEN << BlockBar(a.second, 12) << RESET
              << "  " << fixed << setprecision(1) << (a.second * 100.0) << "%\n";
     }
+}
+
+string ActionDisplayLabel(const string &moveName) {
+    return DisplayLabel(moveName);
 }
 
 }

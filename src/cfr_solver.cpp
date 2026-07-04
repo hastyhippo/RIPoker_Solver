@@ -17,9 +17,19 @@ CFRSolver::~CFRSolver() {
     for (auto &entry : positionMap) delete entry.second;
 }
 
+void CFRSolver::Reset(int newStack0, int newStack1, bool newUseBetSizeBuckets) {
+    for (auto &entry : positionMap) delete entry.second;
+    positionMap.clear();
+    positionCount.clear();
+    iteration = 0;
+    stack0 = newStack0;
+    stack1 = newStack1;
+    useBetSizeBuckets = newUseBetSizeBuckets;
+}
+
 void CFRSolver::TrainCFR() {
     iteration++;
-    Game g(STARTING_STACK);
+    Game g(stack0, stack1, useBetSizeBuckets);
     g.InitialiseGame(0);
     CFR(g, 1, 1);
 }
@@ -31,8 +41,8 @@ Node *CFRSolver::GetNode(const string &hash, const vector<bool> &possible_action
         positionMap.emplace(hash, new_node);
         return new_node;
     }
-    // Note: the SPR/bet-size abstraction can in principle map two distinct
-    // concrete states onto the same hash, so the stored node's legality mask
+    // Note: the bet-size abstraction (bucketed history mode) can in principle
+    // map two distinct concrete states onto the same hash, so the stored node's legality mask
     // (set at creation time) may not exactly match every later visit's real
     // possible_actions. That's fine - UpdateStrategy/UpdateRegret/GetFinalStrategy
     // always take the CURRENT possible_actions as a parameter and never read
@@ -52,6 +62,11 @@ double CFRSolver::CFR(Game &g, double p1, double p2) {
     if (g.terminal) {
         return g.GetUtility();
     }
+
+    // Captured before any MakeMove call below can mutate g.player - this is
+    // the player whose decision `chance` (and later, `strategy`) belongs to,
+    // and must stay fixed for the whole frame regardless of who acts next.
+    int actingPlayer = g.player;
 
     vector<bool> possible_actions = g.GetActions(false);
     string hash = Node::GetHash(g);
@@ -75,7 +90,7 @@ double CFRSolver::CFR(Game &g, double p1, double p2) {
         double chance = strategy[i] / normalising_sum;
 
         g.MakeMove(i);
-        if (g.player == 0) {
+        if (actingPlayer == 0) {
             action_val[i] = -CFR(g, p1 * chance, p2);
         } else {
             action_val[i] = -CFR(g, p1, p2 * chance);
@@ -92,7 +107,7 @@ double CFRSolver::CFR(Game &g, double p1, double p2) {
     // Counterfactual regret is weighted by the OPPONENT's reach probability;
     // the running average strategy is weighted by the ACTING player's own
     // reach probability (standard vanilla-CFR formulation).
-    if (g.player == 0) {
+    if (actingPlayer == 0) {
         currentNode->UpdateRegret(regrets, possible_actions, /*opp_reach=*/p2, /*own_reach=*/p1, iteration);
     } else {
         currentNode->UpdateRegret(regrets, possible_actions, /*opp_reach=*/p1, /*own_reach=*/p2, iteration);
@@ -144,11 +159,11 @@ double CFRSolver::BestResponseValue(Game &g, int br_player) {
 double CFRSolver::EstimateExploitability(int num_samples) {
     double br0_total = 0, br1_total = 0;
     for (int s = 0; s < num_samples; s++) {
-        Game g0(STARTING_STACK);
+        Game g0(stack0, stack1, useBetSizeBuckets);
         g0.InitialiseGame(0);
         br0_total += BestResponseValue(g0, 0);
 
-        Game g1(STARTING_STACK);
+        Game g1(stack0, stack1, useBetSizeBuckets);
         g1.InitialiseGame(0);
         // BestResponseValue returns utility for whoever is to act at the
         // root (player 0, since first_to_act=0); negate to get player 1's

@@ -15,20 +15,15 @@
 #define BET_8_MAX 3
 
 #define RAISE_A_MAX 2.4
-#define RAISE_B_MAX 2.8 
-#define RAISE_C_MAX 3.4 
-#define RAISE_D_MAX 4 
-#define RAISE_E_MAX 5  
+#define RAISE_B_MAX 2.8
+#define RAISE_C_MAX 3.4
+#define RAISE_D_MAX 4
+#define RAISE_E_MAX 5
 
-#define SPR_0_MAX 0.5
-#define SPR_1_MAX 1
-#define SPR_2_MAX 2
-#define SPR_3_MAX 4
-#define SPR_4_MAX 6
-#define SPR_5_MAX 10
-#define SPR_6_MAX 20
-
-#define ANTE 1
+// Not a flat ante - the first player to act (OOP) posts ANTE_FIRST_TO_ACT,
+// the other player (IP) posts ANTE_SECOND_TO_ACT, before any action.
+#define ANTE_FIRST_TO_ACT 1
+#define ANTE_SECOND_TO_ACT 2
 #define NUM_ACTIONS 11
 #define MISC_ACTIONS 4
 #define NUM_BETS 3

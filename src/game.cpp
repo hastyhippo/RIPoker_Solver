@@ -23,17 +23,32 @@ bool isNumber(const string& s) {
 }
 
 
-Game::Game(int startingStack) {
+Game::Game(int stack0, int stack1, bool useBetSizeBuckets) {
     this->deck = Deck();
     // Create the cards that the players receive
     this->hands = vector<Card>(NUM_PLAYERS);
     this->board = vector<Card>(2);
-    this->effective_stack = vector<int>(NUM_PLAYERS, startingStack);
-    this->chips = vector<int>(NUM_PLAYERS, startingStack);
+    this->effective_stack = {stack0, stack1};
+    this->chips = {stack0, stack1};
     this->pot = 0;
     this->abstractHistory = "";
     this->player = 0;
     this->stage = 0;
+    this->useBetSizeBuckets = useBetSizeBuckets;
+}
+
+// Total chips in play at the current decision: the committed pot (only
+// updated when a street closes) plus both players' as-yet-uncommitted
+// current-street contributions.
+int Game::KeyPot() {
+    return pot + bet_states[stage][0] + bet_states[stage][1];
+}
+
+// Chips the acting player still owes to match the opponent's current-street
+// bet - 0 when there's nothing to call (a check-decision node). Never
+// negative at a real decision node, but floored at 0 defensively.
+int Game::KeyBet() {
+    return max(0, bet_states[stage][1 - player] - bet_states[stage][player]);
 }
 
 string printArray(vector<int>v) {
@@ -86,13 +101,12 @@ void Game::InitialiseGame(int OOP) {
 
     bet_states = {{0, 0}, {0,0}, {0,0}};
 
-    for (int i = 0; i < NUM_PLAYERS; i++) {
-        effective_stack[i] -= ANTE;
-        pot += ANTE;
-    }
-
-    effective_stack[0] = min(effective_stack[0], effective_stack[1]);
-    effective_stack[1] = min(effective_stack[0], effective_stack[1]);
+    // Not a flat ante: the first player to act posts ANTE_FIRST_TO_ACT, the
+    // other player posts ANTE_SECOND_TO_ACT.
+    effective_stack[OOP] -= ANTE_FIRST_TO_ACT;
+    pot += ANTE_FIRST_TO_ACT;
+    effective_stack[1 - OOP] -= ANTE_SECOND_TO_ACT;
+    pot += ANTE_SECOND_TO_ACT;
 
     first_to_act = OOP;
     player = first_to_act;
@@ -196,7 +210,7 @@ void Game::MakeMove(int move_type) {
             update_stage = true;
         }
         moveHistory.push_back(to_string(player) + "B0");
-        abstractHistory += Node::GetBetAction(pot, 0);
+        abstractHistory += Node::GetBetAction(pot, 0, useBetSizeBuckets);
 
     } else if (move_type == FOLD) {
         moveHistory.push_back(to_string(player) + "F");
@@ -204,16 +218,27 @@ void Game::MakeMove(int move_type) {
         abstractHistory += 'f';
     }
     else if (move_type == CALL) {
-        int call_size = bet_states[stage][1 - player] - bet_states[stage][player];
-        assert(call_size > 0);
+        // Usually positive (matching a larger bet/raise), but can be zero or
+        // negative when the opponent's total this street is an all-in for
+        // less than what this player already has in - "calling" then costs
+        // nothing further (or effectively matches down to their smaller
+        // amount). Also capped at this player's own remaining stack, for the
+        // symmetric case where THIS player can't fully cover the facing bet
+        // (short all-in via calling). Every update below is written in terms
+        // of call_size so both cases fall out correctly without branching.
+        // Note: this game has no side-pot accounting, so when a capped call
+        // leaves the two bet_states unequal, the uncontested excess still
+        // ends up in the shared pot rather than refunded to the larger
+        // bettor - a known simplification, not full heads-up-rules accuracy.
+        int call_size = min(bet_states[stage][1 - player] - bet_states[stage][player], effective_stack[player]);
 
         moveHistory.push_back(to_string(player) + "B" + to_string(call_size));
         abstractHistory += 'c';
-        effective_stack[player] -= (bet_states[stage][1 - player] - bet_states[stage][player]);
-        bet_states[stage][player] = bet_states[stage][1 - player];
+        effective_stack[player] -= call_size;
+        bet_states[stage][player] += call_size;
 
         // End state - increase pot size
-        pot += bet_states[stage][player] * 2;
+        pot += bet_states[stage][0] + bet_states[stage][1];
 
         // Calling will always end action for 2p
         stage++;
@@ -240,7 +265,7 @@ void Game::MakeMove(int move_type) {
         bet_states[stage][player] = bet_size;
 
         moveHistory.push_back(to_string(player) + "B" + to_string(bet_size));
-        abstractHistory += Node::GetBetAction(pot, bet_size);
+        abstractHistory += Node::GetBetAction(pot, bet_size, useBetSizeBuckets);
     } else if (move_type >= MISC_ACTIONS + NUM_BETS && move_type <= MISC_ACTIONS + NUM_BETS + NUM_RAISES) {
         //Raise
         int raise_size = bet_states[stage][1 - player] * raise_sizings[move_type - (MISC_ACTIONS + NUM_BETS)];
@@ -251,7 +276,7 @@ void Game::MakeMove(int move_type) {
         bet_states[stage][player] = raise_size;
 
         moveHistory.push_back(to_string(player) + "B" + to_string(extra_chips));
-        abstractHistory += Node::GetRaiseAction(raise_size, bet_states[stage][1-player]);
+        abstractHistory += Node::GetRaiseAction(raise_size, bet_states[stage][1-player], useBetSizeBuckets);
     }
 
 
@@ -275,6 +300,24 @@ void Game::MakeMove(int move_type) {
     }
 }
 
+// Removes the single most-recently-appended abstractHistory token. Most
+// tokens are exactly one character, but exact-bet-sizing mode's "[N]"/"{N}"
+// tokens (see Node::GetBetAction/GetRaiseAction) are multi-character - a
+// plain pop_back() would only strip the closing bracket and leave the rest
+// as corrupt garbage for the next MakeMove to build on top of. Brackets
+// never nest and no other token ever ends in ']'/'}', so this is unambiguous.
+void PopAbstractHistoryToken(string &abstractHistory) {
+    if (abstractHistory.empty()) return;
+    char last = abstractHistory.back();
+    if (last == ']') {
+        abstractHistory.erase(abstractHistory.rfind('['));
+    } else if (last == '}') {
+        abstractHistory.erase(abstractHistory.rfind('{'));
+    } else {
+        abstractHistory.pop_back();
+    }
+}
+
 void Game::UnmakeMove() {
     assert(!moveHistory.empty());
     terminal = false;
@@ -282,25 +325,80 @@ void Game::UnmakeMove() {
 
     if (last_move[1] == 'F') {
         moveHistory.pop_back();
-        abstractHistory.pop_back();
+        PopAbstractHistoryToken(abstractHistory);
         player = last_move[0] - '0';
         return;
     } else if (last_move == "|") {
         stage--;
-        assert(bet_states[stage][0] == bet_states[stage][1]);
+        // Not necessarily equal: a capped call (a player calling for less
+        // than the full facing bet because it exceeds their own remaining
+        // stack) can legitimately leave the two unequal - see MakeMove's
+        // CALL branch. The pot subtraction below doesn't depend on equality.
 
         // Update pot amount and get the next move before that
         pot -= bet_states[stage][0] + bet_states[stage][1];
         moveHistory.pop_back();
-        abstractHistory.pop_back();
+        PopAbstractHistoryToken(abstractHistory);
         last_move = moveHistory.back();
     }
     assert(!moveHistory.empty());
 
     moveHistory.pop_back();
-    abstractHistory.pop_back();
+    PopAbstractHistoryToken(abstractHistory);
     player = last_move[0] - '0';
     int bet_size = stoi(last_move.substr(2,last_move.length()-2));
     bet_states[stage][player] -= bet_size;
     effective_stack[player] += bet_size;
+}
+
+Game Game::ReplayExactHistory(int stack0, int stack1, const string &history, bool &ok) {
+    Game g(stack0, stack1, false);
+    g.InitialiseGame(0);
+    ok = true;
+
+    size_t i = 0;
+    while (i < history.size()) {
+        char c = history[i];
+        if (c == ',') { i++; continue; } // stage transition - a side effect of the action just replayed, not a token of its own
+
+        int move_type = -1;
+        size_t tokenLen = 1;
+        if (c == '0') {
+            move_type = CHECK;
+        } else if (c == 'f') {
+            move_type = FOLD;
+        } else if (c == 'c') {
+            move_type = CALL;
+        } else if (c == 'a') {
+            move_type = ALLIN;
+        } else if (c == '[') {
+            size_t end = history.find(']', i);
+            if (end == string::npos) { ok = false; break; }
+            int amt = stoi(history.substr(i + 1, end - i - 1));
+            tokenLen = end - i + 1;
+            for (int dx = 0; dx < NUM_BETS; dx++) {
+                if ((int)(bet_sizings[dx] * g.pot) == amt) { move_type = MISC_ACTIONS + dx; break; }
+            }
+        } else if (c == '{') {
+            size_t end = history.find('}', i);
+            if (end == string::npos) { ok = false; break; }
+            int amt = stoi(history.substr(i + 1, end - i - 1));
+            tokenLen = end - i + 1;
+            int facing = g.bet_states[g.stage][1 - g.player];
+            for (int dx = 0; dx < NUM_RAISES; dx++) {
+                if ((int)(raise_sizings[dx] * facing) == amt) { move_type = MISC_ACTIONS + NUM_BETS + dx; break; }
+            }
+        } else {
+            // Single-letter bucketed token (bet/raise recorded in bucketed
+            // mode) - ambiguous, can't recover an exact chip amount from it.
+            ok = false;
+            break;
+        }
+
+        if (move_type == -1) { ok = false; break; }
+        g.MakeMove(move_type);
+        i += tokenLen;
+    }
+
+    return g;
 }

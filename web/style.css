@@ -7,23 +7,27 @@
   --gridline: #e1e0d9;
   --border: rgba(11, 11, 11, 0.10);
 
-  /* Categorical (from the project's validated default palette) */
-  --action-call: #2a78d6;
-  --action-fold: #e34948;
-  --action-allin: #4a3aa7;
-  --action-check: #9a9890;
+  /* Categorical: Check/Call both green (distinct shades), Fold blue. */
+  --action-call: #66bb6a;
+  --action-fold: #2a78d6;
+  --action-allin: #4a148c;
+  --action-check: #2e7d32;
 
-  /* Single-hue sequential ramps, light -> dark, for the ordinal bet/raise sizes.
-     Not run through the automated CVD validator (internal tool, not
-     public-facing) - color is always paired with a visible text label in the
-     legend/tooltip, so identity never depends on color alone. */
-  --bet-1: #8fd18f;
-  --bet-2: #008300;
-  --bet-3: #005c00;
-  --raise-1: #f3a67c;
-  --raise-2: #eb6834;
-  --raise-3: #c94f1f;
-  --raise-4: #9c3d15;
+  /* Endpoints of the dark-red bet/raise ramp - app.js interpolates between
+     these across however many bet/raise sizes the backend reports (the set
+     is variable, not fixed to a specific count), so the smallest is this
+     start color and the largest is this end color, in ascending order of
+     aggression. Stays in the red family, just deepening (with only a slight
+     maroon undertone) as size grows. Not run through the automated CVD
+     validator (internal tool, not public-facing) - color is always paired
+     with a visible text label in the legend/tooltip, so identity never
+     depends on color alone. */
+  --bet-ramp-start: #a51c1c;
+  --bet-ramp-end: #3f170f;
+
+  /* Independent of the action palette above - used for generic status text. */
+  --status-ok: #008300;
+  --status-error: #e34948;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -36,18 +40,16 @@
     --gridline: #2c2c2a;
     --border: rgba(255, 255, 255, 0.10);
 
-    --action-call: #3987e5;
-    --action-fold: #e66767;
-    --action-allin: #9085e9;
-    --action-check: #6f6d66;
+    --action-call: #81c784;
+    --action-fold: #3987e5;
+    --action-allin: #8b5cf6;
+    --action-check: #4caf50;
 
-    --bet-1: #5fae5f;
-    --bet-2: #1f9e1f;
-    --bet-3: #0d5c0d;
-    --raise-1: #f0a878;
-    --raise-2: #d95926;
-    --raise-3: #b8481c;
-    --raise-4: #8a3712;
+    --bet-ramp-start: #d23030;
+    --bet-ramp-end: #612417;
+
+    --status-ok: #1f9e1f;
+    --status-error: #e66767;
   }
 }
 

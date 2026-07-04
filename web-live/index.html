@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RIPoker_Solver Live</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <h1>RIPoker_Solver Live</h1>
+  <p class="subtitle">Configure stacks, train the live solver, and look up any position's current strategy.</p>
+
+  <div class="panel">
+    <div class="panel-title">Starting stack</div>
+    <div class="row">
+      <label class="field">Effective stack
+        <input type="number" id="stack" value="20" min="1">
+      </label>
+      <label class="field-checkbox">
+        <input type="checkbox" id="useBetSizeBuckets">
+        Use bet-size buckets <span class="hint">(default is exact chip amounts; check to use percentage-of-pot buckets instead)</span>
+      </label>
+      <button class="primary" id="saveStacksBtn">Save (wipes all trained data)</button>
+    </div>
+    <div class="status" id="stacksStatus"></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title">Training</div>
+    <div class="row">
+      <label class="field">Iterations
+        <input type="number" id="iterations" value="1000" min="1">
+      </label>
+      <button class="primary" id="trainBtn">Run</button>
+      <button class="secondary" id="cancelTrainBtn" disabled>Cancel</button>
+    </div>
+    <div class="progress-track" id="trainProgressTrack" style="display:none;">
+      <div class="progress-fill" id="trainProgressFill"></div>
+    </div>
+    <div class="status" id="trainStatus"></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title">Position</div>
+    <div class="row">
+      <label class="field">History code
+        <input type="text" id="history" class="wide" placeholder="e.g. 07AA,5">
+      </label>
+      <label class="field">Board card 1 (flop)
+        <input type="text" id="board0" placeholder="e.g. 4" maxlength="1">
+      </label>
+      <label class="field">Board card 2 (turn)
+        <input type="text" id="board1" placeholder="e.g. 6" maxlength="1">
+      </label>
+      <button class="secondary" id="lookupBtn">Look up</button>
+      <button class="secondary" id="randomBtn">Random position</button>
+    </div>
+    <div class="status" id="positionStatus"></div>
+  </div>
+
+  <div class="panel" id="resultsPanel">
+    <div class="panel-title">Strategy</div>
+    <div id="results">Loading…</div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

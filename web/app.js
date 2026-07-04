@@ -2,15 +2,77 @@
 // picker) and lets you click through the solved tree the way a GTO trainer
 // does: pick an action, drill into the resulting node, repeat.
 
-const ACTION_ORDER = ['Check', 'Call', 'Fold', 'Allin', 'B50', 'B100', 'B200', 'R2.2', 'R2.6', 'R3', 'R4'];
-const ACTION_COLORS = {
+// The bet/raise sizing grid is configurable on the backend (see game.cpp's
+// bet_sizings/raise_sizings), so the set and order of actions is read from
+// data.actionOrder/data.actionLabels (populated in init()) rather than
+// hardcoded here. Only Check/Call/Fold/Allin get a fixed color - every other
+// action is treated as a bet/raise and colored by interpolating across
+// --bet-ramp-start/--bet-ramp-end according to its rank among however many
+// bet/raise sizes are actually present.
+let ACTION_ORDER = [];
+let ACTION_LABELS = {};
+const FIXED_COLORS = {
   Check: 'var(--action-check)',
   Call: 'var(--action-call)',
   Fold: 'var(--action-fold)',
   Allin: 'var(--action-allin)',
-  B50: 'var(--bet-1)', B100: 'var(--bet-2)', B200: 'var(--bet-3)',
-  'R2.2': 'var(--raise-1)', 'R2.6': 'var(--raise-2)', R3: 'var(--raise-3)', R4: 'var(--raise-4)',
 };
+
+function hexToRgb(hex) {
+  const n = parseInt(hex.replace('#', ''), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+function rgbToHex(rgb) {
+  return '#' + rgb.map((v) => Math.round(v).toString(16).padStart(2, '0')).join('');
+}
+
+function lerpHex(startHex, endHex, t) {
+  const a = hexToRgb(startHex);
+  const b = hexToRgb(endHex);
+  return rgbToHex(a.map((v, i) => v + (b[i] - v) * t));
+}
+
+function actionColor(action) {
+  if (FIXED_COLORS[action]) return FIXED_COLORS[action];
+  const rampActions = ACTION_ORDER.filter((a) => !FIXED_COLORS[a]);
+  const idx = rampActions.indexOf(action);
+  if (idx === -1) return '#888';
+  const t = rampActions.length > 1 ? idx / (rampActions.length - 1) : 0;
+  const style = getComputedStyle(document.documentElement);
+  const start = style.getPropertyValue('--bet-ramp-start').trim();
+  const end = style.getPropertyValue('--bet-ramp-end').trim();
+  return lerpHex(start, end, t);
+}
+
+// The backend reports the actual chip amount behind a bet/raise (replayed
+// from the real pot/bet_states at that position - see
+// Game::ReplayExactHistory) whenever it can, rather than the abstract sizing
+// name - show that real number instead of "Bet 50%"/"Raise 2.2x" wherever
+// it's available. Falls back to the abstract label if the backend couldn't
+// resolve a size (e.g. history recorded in bucketed rather than exact mode).
+function actionLabel(action, size) {
+  if (size === undefined || size === null) return ACTION_LABELS[action];
+  if (action[0] === 'B') return `Bet ${size}`;
+  if (action[0] === 'R') return `Raise to ${size}`;
+  return ACTION_LABELS[action];
+}
+
+// Real chip size behind each bet/raise at whichever node is currently
+// rendered - the same for every hand in that node, so it's collected once in
+// buildNodeCard() and reused by the legend/action buttons/picker built from
+// it, rather than threaded through every function's parameters.
+let currentActionSizes = {};
+
+function collectActionSizes(node) {
+  const sizes = {};
+  for (const h of node.hands) {
+    for (const s of h.strategy) {
+      if (s.size !== undefined && s.size !== null) sizes[s.action] = s.size;
+    }
+  }
+  return sizes;
+}
 
 let data = null;
 let historyIndex = null;
@@ -44,17 +106,19 @@ function candidateLabel(current, candidate) {
     const slot = current.stage; // 0: preflop->flop reveals board[0]; 1: flop->turn reveals board[1]
     return 'Board: ' + (candidate.board[slot] ?? '?');
   }
-  return 'SPR bucket ' + candidate.sprBucket;
+  return `Pot ${candidate.pot}, to call ${candidate.bet}`;
 }
 
 function renderBar(strategy) {
   const byAction = new Map(strategy.map((s) => [s.action, s.prob]));
+  const sizeByAction = new Map(strategy.map((s) => [s.action, s.size]));
   let html = '<div class="bar">';
   for (const action of ACTION_ORDER) {
     const prob = byAction.get(action);
     if (!prob || prob <= 0.001) continue;
     const pct = (prob * 100).toFixed(1);
-    html += `<div class="seg" style="width:${pct}%;background:${ACTION_COLORS[action]}" data-tip="${action}: ${pct}%"></div>`;
+    const label = actionLabel(action, sizeByAction.get(action));
+    html += `<div class="seg" style="width:${pct}%;background:${actionColor(action)}" data-tip="${label}: ${pct}%"></div>`;
   }
   html += '</div>';
   return html;
@@ -65,7 +129,7 @@ function buildLegend() {
   el.className = 'legend';
   for (const action of ACTION_ORDER) {
     const span = document.createElement('span');
-    span.innerHTML = `<span class="swatch" style="background:${ACTION_COLORS[action]}"></span>${action}`;
+    span.innerHTML = `<span class="swatch" style="background:${actionColor(action)}"></span>${actionLabel(action, currentActionSizes[action])}`;
     el.appendChild(span);
   }
   return el;
@@ -115,7 +179,7 @@ function buildActionButtons(node) {
     if (!actionSet.has(action)) continue;
     const children = findChildren(node, action);
     const btn = document.createElement('button');
-    btn.textContent = action;
+    btn.textContent = actionLabel(action, currentActionSizes[action]);
     btn.disabled = children.length === 0;
     if (children.length > 0) {
       any = true;
@@ -136,8 +200,9 @@ function buildActionButtons(node) {
 }
 
 function handleActionClick(node, action, children) {
+  const label = actionLabel(action, currentActionSizes[action]);
   if (children.length === 1) {
-    navigateTo(action, children[0]);
+    navigateTo(label, children[0]);
     return;
   }
   const content = document.getElementById('content');
@@ -145,17 +210,17 @@ function handleActionClick(node, action, children) {
   picker.className = 'node-card';
   const title = document.createElement('div');
   title.className = 'meta';
-  title.textContent = `Multiple outcomes observed after "${action}" - pick one:`;
+  title.textContent = `Multiple outcomes observed after "${label}" - pick one:`;
   picker.appendChild(title);
 
   const pickerRow = document.createElement('div');
   pickerRow.className = 'picker';
   const sorted = [...children].sort((a, b) => b.visits - a.visits);
   for (const c of sorted) {
+    const candLabel = candidateLabel(node, c);
     const btn = document.createElement('button');
-    const label = candidateLabel(node, c);
-    btn.textContent = `${label} (${c.visits} visits)`;
-    btn.addEventListener('click', () => navigateTo(`${action} → ${label}`, c));
+    btn.textContent = `${candLabel} (${c.visits} visits)`;
+    btn.addEventListener('click', () => navigateTo(`${label} → ${candLabel}`, c));
     pickerRow.appendChild(btn);
   }
   picker.appendChild(pickerRow);
@@ -169,13 +234,15 @@ function navigateTo(label, node) {
 }
 
 function buildNodeCard(node) {
+  currentActionSizes = collectActionSizes(node);
+
   const card = document.createElement('div');
   card.className = 'node-card';
 
   const meta = document.createElement('div');
   meta.className = 'meta';
   const boardStr = node.board.map((b) => b ?? '?').join('  ');
-  meta.innerHTML = `<b>${stageLabel(node.stage)}</b> &middot; Board: ${boardStr} &middot; SPR bucket: ${node.sprBucket} &middot; visits: ${node.visits}`;
+  meta.innerHTML = `<b>${stageLabel(node.stage)}</b> &middot; Board: ${boardStr} &middot; Pot: ${node.pot} &middot; To call: ${node.bet} &middot; visits: ${node.visits}`;
   card.appendChild(meta);
 
   const historyMeta = document.createElement('div');
@@ -229,6 +296,14 @@ function render() {
 
 function init(parsed) {
   data = parsed;
+  ACTION_ORDER = data.actionOrder.slice();
+  // Allin is the largest possible action but the backend lists it right
+  // after Fold (it's grouped with the other "misc" actions there) - move it
+  // to the end so the bar/legend read left-to-right as: passive actions,
+  // then every bet/raise size in ascending order, then all-in.
+  const allinIdx = ACTION_ORDER.indexOf('Allin');
+  if (allinIdx !== -1) ACTION_ORDER.push(ACTION_ORDER.splice(allinIdx, 1)[0]);
+  ACTION_LABELS = Object.assign({}, data.actionLabels);
   historyIndex = buildHistoryIndex(data.nodes);
   const root = (historyIndex.get('0|') || [])[0];
   if (!root) {

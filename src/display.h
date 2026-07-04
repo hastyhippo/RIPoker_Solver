@@ -30,4 +30,9 @@ namespace Display {
     // decision point, restricted to legal actions - used during interactive
     // play so the human can see what the trained strategy recommends here.
     void PrintOptimalStrategy(const std::vector<double> &strategy, const std::vector<bool> &possible_actions, bool isHumanTurn);
+
+    // Translates a raw move_names entry ("B200", "R2.2", ...) into a clearer
+    // label for display (the raw form stays the stable identifier used for
+    // legality-array indexing/color-keying elsewhere).
+    std::string ActionDisplayLabel(const std::string &moveName);
 }

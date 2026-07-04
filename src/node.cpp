@@ -8,11 +8,14 @@
 #include <bitset>
 
 #include "node.h"
+#include "game.h"
 #include "defines.h"
 using namespace std;
 
 /*
-    Hash bit layout (bits, low to high):
+    Infoset key format: "<packedHash>|<pot>|<bet>|<abstractHistory>"
+
+    packedHash bit layout (bits, low to high):
       0-3   : hole card value
       4-7   : board[0] value (only set once stage >= FLOP)
       8-11  : board[1] value (only set once stage >= TURN)
@@ -21,22 +24,21 @@ using namespace std;
         1 -> 1 Board + Hole Card same (Flush Draw for flop, Brick for turn)
         2 -> 2 Board + Hole Card same (Flush complete)
         3 -> Board has same suits (Flush on board, no flush for you)
-      14-16 : SPR bucket (effective stack : pot)
-        0 :  0 -> 0.5
-        1 :  0.5 -> 1
-        2 :  1 -> 2
-        3 :  2 -> 4
-        4 :  4 -> 6
-        5 :  6 -> 10
-        6 :  10 -> 20
-        7 :  20 +
-      17-18 : stage (PREFLOP/FLOP/TURN)
+      14-15 : stage (PREFLOP/FLOP/TURN)
+
+    The money state is keyed on the ACTUAL chip amounts rather than a
+    stack-to-pot ratio bucket: <pot> is the total chips in play at this
+    decision (committed pot + both players' current-street bets) and <bet> is
+    what the acting player must add to call (0 when not facing a bet). These
+    are plain decimal fields in the key string (not bit-packed) because they
+    can exceed the spare bits above; abstractHistory never contains '|', so
+    the three leading '|'-delimited fields parse unambiguously.
 
     Board bits are only ever OR'd in once that street's card has actually been
     dealt (stage-gated), so no information about undealt cards is ever encoded.
 
-    Betting sequence
-    String:
+    Betting sequence string - two encodings depending on Game::useBetSizeBuckets:
+      Bucketed (default), one character per action:
         '0' - Check
         '1' - min-25%
         '2' - 25%->40%
@@ -48,7 +50,8 @@ using namespace std;
         '8' - 200%->300%
         '9' - 300%+
         'a' - allin
-        'b' - call
+        'c' - call
+        'f' - fold
 
         'A' - raise 2x-2.4x
         'B' - raise 2.4x - 2.8x
@@ -56,6 +59,10 @@ using namespace std;
         'D' - raise 3.4x - 4x
         'E' - raise 4x - 5x
         'F' - 5x+
+      Exact, bets/raises become a delimited exact chip amount instead of a
+      single letter (check/call/fold/allin are unaffected either way):
+        "[N]" - bet of exactly N chips
+        "{N}" - raise to exactly N chips
 */
 
 Node::Node(const vector<bool> &actions) {
@@ -70,121 +77,134 @@ Node::Node(const vector<bool> &actions) {
     possible_actions = actions;
 }
 
-char Node::GetBetAction(int pot, int bet_size) {
+string Node::GetBetAction(int pot, int bet_size, bool useBuckets) {
     if (bet_size == 0) {
         //Check call
-        return '0';
-    } 
+        return "0";
+    }
+    if (!useBuckets) {
+        return "[" + to_string(bet_size) + "]";
+    }
     double ratio = (double)bet_size / pot;
     if (ratio < BET_1_MAX) {
-        return '1';
+        return "1";
     } else if (ratio < BET_2_MAX) {
-        return '2';
+        return "2";
     } else if (ratio < BET_3_MAX) {
-        return '3';
+        return "3";
     }else if (ratio < BET_4_MAX) {
-        return '4';
+        return "4";
     } else if (ratio < BET_5_MAX) {
-        return '5';
+        return "5";
     } else if (ratio < BET_6_MAX) {
-        return '6';
+        return "6";
     } else if (ratio < BET_7_MAX) {
-        return '7';
+        return "7";
     } else if (ratio < BET_8_MAX) {
-        return '8';
+        return "8";
     } else {
-        return '9';
+        return "9";
     }
 }
 
 // RAISES ONLY
-char Node::GetRaiseAction(int bet_size, int last_bet_size) {
+string Node::GetRaiseAction(int bet_size, int last_bet_size, bool useBuckets) {
+    if (!useBuckets) {
+        return "{" + to_string(bet_size) + "}";
+    }
     double ratio = (double)bet_size / last_bet_size;
     if (ratio < RAISE_A_MAX) {
-        return 'A';
+        return "A";
     } else if (ratio < RAISE_B_MAX) {
-        return 'B';
+        return "B";
     } else if (ratio < RAISE_C_MAX) {
-        return 'C';
+        return "C";
     } else if (ratio < RAISE_D_MAX) {
-        return 'D';
+        return "D";
     } else if (ratio < RAISE_E_MAX) {
-        return 'E';
+        return "E";
     } else {
-        return 'F';
+        return "F";
     }
 }
 
-int getSPR(double spr) {
-    if(spr < SPR_0_MAX) {
-        return 0;
-    } else if (spr < SPR_1_MAX) {
-        return 1;
-    } else if (spr < SPR_2_MAX) {
-        return 2;
-    } else if (spr < SPR_3_MAX) {
-        return 3;
-    } else if (spr < SPR_4_MAX) {
-        return 4;
-    } else if (spr < SPR_5_MAX) {
-        return 5;
-    } else if (spr < SPR_6_MAX) {
-        return 6;
-    } 
-    return 7;
+uint32_t Node::BuildHash(int handVal, int board0Val, int board1Val, int flushInfo, int stage) {
+    uint32_t hash = 0;
+
+    // Bits 0-3: hole card value. Always known to the acting player.
+    hash |= (uint32_t)handVal;
+
+    // Bits 4-7 / 8-11: board cards. Only included once that street's card has
+    // actually been dealt, so no future/undealt card ever leaks into the hash.
+    if (stage >= FLOP) hash |= ((uint32_t)board0Val << 4);
+    if (stage >= TURN) hash |= ((uint32_t)board1Val << 8);
+
+    // Bits 12-13: suit connection info (only meaningful once relevant cards are dealt).
+    if (stage >= FLOP) hash |= ((uint32_t)flushInfo << 12);
+
+    // Bits 14-15: stage, tagged explicitly so it can always be recovered reliably.
+    hash |= (uint32_t)stage << 14;
+
+    return hash;
+}
+
+string Node::BuildKey(int handVal, int board0Val, int board1Val, int flushInfo, int stage, int pot, int bet, const string &history) {
+    uint32_t hash = BuildHash(handVal, board0Val, board1Val, flushInfo, stage);
+    return to_string(hash) + "|" + to_string(pot) + "|" + to_string(bet) + "|" + history;
 }
 
 string Node::GetHash(Game &g) {
-    uint32_t hash = 0;
     int player = g.player;
+    int flushInfo = 0;
 
-    // Bits 0-3: hole card value. Always known to the acting player.
-    hash |= g.hands[player].getValue();
-
-    // Bits 4-7 / 8-11: board cards. Only OR'd in once that street's card has
-    // actually been dealt, so no future/undealt card ever leaks into the hash.
-    if (g.stage >= FLOP) hash |= (g.board[0].getValue() << 4);
-    if (g.stage >= TURN) hash |= (g.board[1].getValue() << 8);
-
-    // Bits 12-13: suit connection info (only meaningful once relevant cards are dealt).
+    // Suit connection info depends on the live game's actual suits, which
+    // BuildHash (given only ranks) can't recompute - derive it here.
     if (g.stage == FLOP) {
-        if (g.hands[player].getSuit() == g.board[0].getSuit()) hash |= (1 << 12);
+        if (g.hands[player].getSuit() == g.board[0].getSuit()) flushInfo = 1;
     } else if (g.stage == TURN) {
         //bricked flush draw
-        if ((g.hands[player].getSuit() == g.board[0].getSuit()) && (g.board[0].getSuit() != g.board[1].getSuit())) hash |= (1 << 12);
+        if ((g.hands[player].getSuit() == g.board[0].getSuit()) && (g.board[0].getSuit() != g.board[1].getSuit())) flushInfo = 1;
         //flush completes
-        if ((g.hands[player].getSuit() == g.board[0].getSuit()) && (g.board[0].getSuit() == g.board[1].getSuit())) hash |= (2 << 12);
+        if ((g.hands[player].getSuit() == g.board[0].getSuit()) && (g.board[0].getSuit() == g.board[1].getSuit())) flushInfo = 2;
         // flush on board
-        if ((g.hands[player].getSuit() != g.board[0].getSuit()) && (g.board[0].getSuit() == g.board[1].getSuit())) hash |= (3 << 12);
+        if ((g.hands[player].getSuit() != g.board[0].getSuit()) && (g.board[0].getSuit() == g.board[1].getSuit())) flushInfo = 3;
     }
 
-    // Bits 14-16: SPR bucket (effective stack : pot ratio).
-    double spr = (double)g.effective_stack[player] / (double)max(g.pot, 1);
-    hash |= (uint32_t)getSPR(spr) << 14;
-
-    // Bits 17-18: stage, tagged explicitly so it can always be recovered reliably.
-    hash |= (uint32_t)g.stage << 17;
-
-    return to_string(hash) + "|" + g.abstractHistory;
+    return BuildKey(
+        g.hands[player].getValue(),
+        g.board[0].getValue(),
+        g.board[1].getValue(),
+        flushInfo,
+        g.stage,
+        g.KeyPot(),
+        g.KeyBet(),
+        g.abstractHistory
+    );
 }
 
 ParsedHash Node::ParseHash(const string& full_hash) {
-    size_t sep = full_hash.find("|");
     ParsedHash parsed{};
-    if (sep == string::npos) {
+
+    // Key format: "<packedHash>|<pot>|<bet>|<abstractHistory>". abstractHistory
+    // never contains '|', so the three leading fields split cleanly and the
+    // history is everything past the third separator.
+    size_t s1 = full_hash.find('|');
+    size_t s2 = (s1 == string::npos) ? string::npos : full_hash.find('|', s1 + 1);
+    size_t s3 = (s2 == string::npos) ? string::npos : full_hash.find('|', s2 + 1);
+    if (s3 == string::npos) {
         cerr << "Invalid hash format.\n";
         return parsed;
     }
 
-    uint32_t hash = (uint32_t)stoul(full_hash.substr(0, sep));
-
-    parsed.handVal = hash & 0xF;              // bits 0-3
-    parsed.board0Val = (hash >> 4) & 0xF;      // bits 4-7
-    parsed.board1Val = (hash >> 8) & 0xF;      // bits 8-11
-    parsed.flushInfo = (hash >> 12) & 0x3;     // bits 12-13
-    parsed.sprCat = (hash >> 14) & 0x7;        // bits 14-16
-    parsed.stage = (hash >> 17) & 0x3;         // bits 17-18
-    parsed.abstractHistory = full_hash.substr(sep + 1);
+    uint32_t hash = (uint32_t)stoul(full_hash.substr(0, s1));
+    parsed.handVal = hash & 0xF;                 // bits 0-3
+    parsed.board0Val = (hash >> 4) & 0xF;        // bits 4-7
+    parsed.board1Val = (hash >> 8) & 0xF;        // bits 8-11
+    parsed.flushInfo = (hash >> 12) & 0x3;       // bits 12-13
+    parsed.stage = (hash >> 14) & 0x3;           // bits 14-15
+    parsed.pot = stoi(full_hash.substr(s1 + 1, s2 - s1 - 1));
+    parsed.bet = stoi(full_hash.substr(s2 + 1, s3 - s2 - 1));
+    parsed.abstractHistory = full_hash.substr(s3 + 1);
 
     return parsed;
 }
