@@ -37,16 +37,18 @@ Game::Game(int stack0, int stack1, bool useBetSizeBuckets) {
     this->useBetSizeBuckets = useBetSizeBuckets;
 }
 
-// Total chips in play at the current decision: the committed pot (only
-// updated when a street closes) plus both players' as-yet-uncommitted
-// current-street contributions.
+// GetUtility() is from `player`'s (inconsistent) perspective; re-express it
+// from a single fixed player-0 perspective by multiplying by player's sign.
+int Game::GetUtilityForPlayer0() {
+    return (player == 0 ? 1 : -1) * GetUtility();
+}
+
+// Total chips in play now: committed pot plus both current-street bets.
 int Game::KeyPot() {
     return pot + bet_states[stage][0] + bet_states[stage][1];
 }
 
-// Chips the acting player still owes to match the opponent's current-street
-// bet - 0 when there's nothing to call (a check-decision node). Never
-// negative at a real decision node, but floored at 0 defensively.
+// Chips the acting player owes to call (0 when not facing a bet).
 int Game::KeyBet() {
     return max(0, bet_states[stage][1 - player] - bet_states[stage][player]);
 }
@@ -218,18 +220,8 @@ void Game::MakeMove(int move_type) {
         abstractHistory += 'f';
     }
     else if (move_type == CALL) {
-        // Usually positive (matching a larger bet/raise), but can be zero or
-        // negative when the opponent's total this street is an all-in for
-        // less than what this player already has in - "calling" then costs
-        // nothing further (or effectively matches down to their smaller
-        // amount). Also capped at this player's own remaining stack, for the
-        // symmetric case where THIS player can't fully cover the facing bet
-        // (short all-in via calling). Every update below is written in terms
-        // of call_size so both cases fall out correctly without branching.
-        // Note: this game has no side-pot accounting, so when a capped call
-        // leaves the two bet_states unequal, the uncontested excess still
-        // ends up in the shared pot rather than refunded to the larger
-        // bettor - a known simplification, not full heads-up-rules accuracy.
+        // Capped at own remaining stack (short all-in call). No side-pot
+        // accounting: uncontested excess still lands in the shared pot.
         int call_size = min(bet_states[stage][1 - player] - bet_states[stage][player], effective_stack[player]);
 
         moveHistory.push_back(to_string(player) + "B" + to_string(call_size));
@@ -300,12 +292,8 @@ void Game::MakeMove(int move_type) {
     }
 }
 
-// Removes the single most-recently-appended abstractHistory token. Most
-// tokens are exactly one character, but exact-bet-sizing mode's "[N]"/"{N}"
-// tokens (see Node::GetBetAction/GetRaiseAction) are multi-character - a
-// plain pop_back() would only strip the closing bracket and leave the rest
-// as corrupt garbage for the next MakeMove to build on top of. Brackets
-// never nest and no other token ever ends in ']'/'}', so this is unambiguous.
+// Removes the last abstractHistory token. Exact-mode "[N]"/"{N}" tokens are
+// multi-char, so strip back to the opening bracket, not just one char.
 void PopAbstractHistoryToken(string &abstractHistory) {
     if (abstractHistory.empty()) return;
     char last = abstractHistory.back();
@@ -330,12 +318,8 @@ void Game::UnmakeMove() {
         return;
     } else if (last_move == "|") {
         stage--;
-        // Not necessarily equal: a capped call (a player calling for less
-        // than the full facing bet because it exceeds their own remaining
-        // stack) can legitimately leave the two unequal - see MakeMove's
-        // CALL branch. The pot subtraction below doesn't depend on equality.
-
-        // Update pot amount and get the next move before that
+        // Undo the street-close pot bump (bet_states may be unequal after a
+        // capped call; the subtraction doesn't depend on equality).
         pot -= bet_states[stage][0] + bet_states[stage][1];
         moveHistory.pop_back();
         PopAbstractHistoryToken(abstractHistory);
@@ -359,7 +343,7 @@ Game Game::ReplayExactHistory(int stack0, int stack1, const string &history, boo
     size_t i = 0;
     while (i < history.size()) {
         char c = history[i];
-        if (c == ',') { i++; continue; } // stage transition - a side effect of the action just replayed, not a token of its own
+        if (c == ',') { i++; continue; } // street transition, not its own token
 
         int move_type = -1;
         size_t tokenLen = 1;
@@ -389,8 +373,7 @@ Game Game::ReplayExactHistory(int stack0, int stack1, const string &history, boo
                 if ((int)(raise_sizings[dx] * facing) == amt) { move_type = MISC_ACTIONS + NUM_BETS + dx; break; }
             }
         } else {
-            // Single-letter bucketed token (bet/raise recorded in bucketed
-            // mode) - ambiguous, can't recover an exact chip amount from it.
+            // Bucketed single-letter token - no exact chip amount to recover.
             ok = false;
             break;
         }

@@ -19,8 +19,7 @@ using namespace std;
 namespace {
 
 string RankName(int value) {
-    // Same suit-stripped Card::getName() trick used in display.cpp; kept as
-    // a tiny local duplicate rather than sharing a header for this one line.
+    // Suit-stripped Card::getName(); local duplicate of display.cpp's helper.
     Card c(value * 4);
     string name = c.getName();
     return name.substr(0, name.find(" of"));
@@ -53,17 +52,13 @@ struct NodeGroup {
     string history;
     int visits = 0;
     vector<HandRow> hands;
-    // Real chip amount behind each currently-available bet/raise action,
-    // reconstructed once per group via Game::ReplayExactHistory - empty if
-    // that replay wasn't possible (e.g. history was recorded in bucketed
-    // rather than exact mode). Keyed by the same move_names entries as each
-    // hand's strategy.
+    // Chip amount per bet/raise/all-in action, keyed by move_names; empty when
+    // the history couldn't be replayed (bucketed mode).
     unordered_map<string, int> actionChipSize;
 };
 
-// Reconstructs the real pot/bet_states behind `history` (see
-// Game::ReplayExactHistory) and, if that succeeds, works out the actual chip
-// amount each currently-offered bet/raise size resolves to at this position.
+// Chip amount each offered bet/raise/all-in resolves to at this position,
+// from replaying the exact history; empty if that replay fails.
 unordered_map<string, int> ComputeActionChipSizes(CFRSolver &cfr, const string &history) {
     unordered_map<string, int> sizes;
     bool ok = false;
@@ -77,6 +72,8 @@ unordered_map<string, int> ComputeActionChipSizes(CFRSolver &cfr, const string &
     for (int dx = 0; dx < NUM_RAISES; dx++) {
         sizes[move_names[MISC_ACTIONS + NUM_BETS + dx]] = (int)(raise_sizings[dx] * facing);
     }
+    // All-in = whole remaining stack (largest bet -> darkest on the ramp).
+    sizes["Allin"] = replayed.effective_stack[replayed.player];
     return sizes;
 }
 
@@ -87,9 +84,7 @@ string GroupKey(const ParsedHash &p) {
     return ss.str();
 }
 
-// Escapes the handful of characters that could ever appear in a printed
-// double/string field. History codes, rank labels and action names in this
-// codebase never contain '"' or '\', so this only needs to be defensive.
+// Defensive JSON string escaping ('"' and '\' only - nothing here contains them).
 void WriteJSONString(ostream &out, const string &s) {
     out << '"';
     for (char c : s) {
@@ -144,16 +139,8 @@ void WriteSolverJSON(CFRSolver &cfr, const string &path, int minVisits) {
         it->second.hands.push_back(hr);
     }
 
-    // Precompute, using the SAME functions the solver uses to build
-    // abstractHistory, which letter each action name maps to. Bet/raise
-    // sizes are always fixed multiples of the current pot/last bet, so the
-    // resulting letter is deterministic regardless of the actual chip
-    // amounts involved - a large reference pot avoids integer-truncation
-    // drift in that computation. Always computed bucketed (useBuckets=true)
-    // regardless of the live solver's actual mode: this static tree browser's
-    // click-navigation assumes one fixed letter per action name, which only
-    // means anything for bucketed sizing - exporting/browsing an exact-mode
-    // solve with this tool is a known, out-of-scope limitation.
+    // Bucketed letter each action maps to, for the static viewer's
+    // click-navigation. A large reference pot avoids truncation drift.
     const int REF = 100000;
     vector<pair<string, string>> actionLetters;
     actionLetters.push_back({"Check", Node::GetBetAction(REF, 0, true)});
@@ -172,10 +159,7 @@ void WriteSolverJSON(CFRSolver &cfr, const string &path, int minVisits) {
     ofstream out(path);
     out << fixed << setprecision(4);
 
-    // move_names is the single source of truth for which actions exist and
-    // what order they come in (bet/raise sizings are configurable in
-    // game.cpp) - the frontend reads these instead of hardcoding its own
-    // action list, so it stays correct if the sizing grid ever changes.
+    // move_names drives the frontend's action list/order (sizings configurable).
     out << "{\n  \"actionOrder\": [";
     for (size_t i = 0; i < move_names.size(); i++) {
         WriteJSONString(out, move_names[i]);

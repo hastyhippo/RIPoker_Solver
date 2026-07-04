@@ -12,58 +12,8 @@
 #include "defines.h"
 using namespace std;
 
-/*
-    Infoset key format: "<packedHash>|<pot>|<bet>|<abstractHistory>"
-
-    packedHash bit layout (bits, low to high):
-      0-3   : hole card value
-      4-7   : board[0] value (only set once stage >= FLOP)
-      8-11  : board[1] value (only set once stage >= TURN)
-      12-13 : suit connection info
-        0 -> All different
-        1 -> 1 Board + Hole Card same (Flush Draw for flop, Brick for turn)
-        2 -> 2 Board + Hole Card same (Flush complete)
-        3 -> Board has same suits (Flush on board, no flush for you)
-      14-15 : stage (PREFLOP/FLOP/TURN)
-
-    The money state is keyed on the ACTUAL chip amounts rather than a
-    stack-to-pot ratio bucket: <pot> is the total chips in play at this
-    decision (committed pot + both players' current-street bets) and <bet> is
-    what the acting player must add to call (0 when not facing a bet). These
-    are plain decimal fields in the key string (not bit-packed) because they
-    can exceed the spare bits above; abstractHistory never contains '|', so
-    the three leading '|'-delimited fields parse unambiguously.
-
-    Board bits are only ever OR'd in once that street's card has actually been
-    dealt (stage-gated), so no information about undealt cards is ever encoded.
-
-    Betting sequence string - two encodings depending on Game::useBetSizeBuckets:
-      Bucketed (default), one character per action:
-        '0' - Check
-        '1' - min-25%
-        '2' - 25%->40%
-        '3' - 40%->60%
-        '4' - 60%->85%
-        '5' - 85%->110%
-        '6' - 110%->150%
-        '7' - 150%->200%
-        '8' - 200%->300%
-        '9' - 300%+
-        'a' - allin
-        'c' - call
-        'f' - fold
-
-        'A' - raise 2x-2.4x
-        'B' - raise 2.4x - 2.8x
-        'C' - raise 2.8x - 3.4x
-        'D' - raise 3.4x - 4x
-        'E' - raise 4x - 5x
-        'F' - 5x+
-      Exact, bets/raises become a delimited exact chip amount instead of a
-      single letter (check/call/fold/allin are unaffected either way):
-        "[N]" - bet of exactly N chips
-        "{N}" - raise to exactly N chips
-*/
+// Infoset key: "<packedHash>|<pot>|<bet>|<history>". packedHash bits: 0-3 hand,
+// 4-11 board (stage-gated), 12-13 flush, 14-15 stage. History: see Get*Action.
 
 Node::Node(const vector<bool> &actions) {
     strategy_sum = vector<double>(NUM_ACTIONS, 0);
@@ -130,21 +80,12 @@ string Node::GetRaiseAction(int bet_size, int last_bet_size, bool useBuckets) {
 
 uint32_t Node::BuildHash(int handVal, int board0Val, int board1Val, int flushInfo, int stage) {
     uint32_t hash = 0;
-
-    // Bits 0-3: hole card value. Always known to the acting player.
-    hash |= (uint32_t)handVal;
-
-    // Bits 4-7 / 8-11: board cards. Only included once that street's card has
-    // actually been dealt, so no future/undealt card ever leaks into the hash.
-    if (stage >= FLOP) hash |= ((uint32_t)board0Val << 4);
-    if (stage >= TURN) hash |= ((uint32_t)board1Val << 8);
-
-    // Bits 12-13: suit connection info (only meaningful once relevant cards are dealt).
-    if (stage >= FLOP) hash |= ((uint32_t)flushInfo << 12);
-
-    // Bits 14-15: stage, tagged explicitly so it can always be recovered reliably.
-    hash |= (uint32_t)stage << 14;
-
+    // Board/flush are stage-gated so no undealt card ever leaks into the hash.
+    hash |= (uint32_t)handVal;                                  // 0-3
+    if (stage >= FLOP) hash |= ((uint32_t)board0Val << 4);      // 4-7
+    if (stage >= TURN) hash |= ((uint32_t)board1Val << 8);      // 8-11
+    if (stage >= FLOP) hash |= ((uint32_t)flushInfo << 12);     // 12-13
+    hash |= (uint32_t)stage << 14;                              // 14-15
     return hash;
 }
 
@@ -157,17 +98,13 @@ string Node::GetHash(Game &g) {
     int player = g.player;
     int flushInfo = 0;
 
-    // Suit connection info depends on the live game's actual suits, which
-    // BuildHash (given only ranks) can't recompute - derive it here.
+    // Flush info depends on live suits, which BuildHash (ranks only) can't see.
     if (g.stage == FLOP) {
         if (g.hands[player].getSuit() == g.board[0].getSuit()) flushInfo = 1;
     } else if (g.stage == TURN) {
-        //bricked flush draw
-        if ((g.hands[player].getSuit() == g.board[0].getSuit()) && (g.board[0].getSuit() != g.board[1].getSuit())) flushInfo = 1;
-        //flush completes
-        if ((g.hands[player].getSuit() == g.board[0].getSuit()) && (g.board[0].getSuit() == g.board[1].getSuit())) flushInfo = 2;
-        // flush on board
-        if ((g.hands[player].getSuit() != g.board[0].getSuit()) && (g.board[0].getSuit() == g.board[1].getSuit())) flushInfo = 3;
+        if ((g.hands[player].getSuit() == g.board[0].getSuit()) && (g.board[0].getSuit() != g.board[1].getSuit())) flushInfo = 1; // bricked draw
+        if ((g.hands[player].getSuit() == g.board[0].getSuit()) && (g.board[0].getSuit() == g.board[1].getSuit())) flushInfo = 2; // completes
+        if ((g.hands[player].getSuit() != g.board[0].getSuit()) && (g.board[0].getSuit() == g.board[1].getSuit())) flushInfo = 3; // on board
     }
 
     return BuildKey(
@@ -185,9 +122,7 @@ string Node::GetHash(Game &g) {
 ParsedHash Node::ParseHash(const string& full_hash) {
     ParsedHash parsed{};
 
-    // Key format: "<packedHash>|<pot>|<bet>|<abstractHistory>". abstractHistory
-    // never contains '|', so the three leading fields split cleanly and the
-    // history is everything past the third separator.
+    // history never contains '|', so the three leading fields split cleanly.
     size_t s1 = full_hash.find('|');
     size_t s2 = (s1 == string::npos) ? string::npos : full_hash.find('|', s1 + 1);
     size_t s3 = (s2 == string::npos) ? string::npos : full_hash.find('|', s2 + 1);
@@ -212,15 +147,9 @@ ParsedHash Node::ParseHash(const string& full_hash) {
 void Node::UpdateRegret(const vector<double> &new_regret, const vector<bool> &possible_actions, double opp_reach, double own_reach, long long iteration) {
     for (int i = 0; i < NUM_ACTIONS; i++) {
         if (!possible_actions[i]) continue;
-        // Counterfactual regret: weighted by the probability the OPPONENT
-        // (not the acting player) contributed to reaching this node.
         regret_sum[i] += opp_reach * new_regret[i];
-        // CFR+-style flooring: clamp accumulated regret to zero immediately,
-        // not just when strategy is derived from it.
-        regret_sum[i] = max(0.0, regret_sum[i]);
-        // Linear-CFR averaging: weight this iteration's contribution to the
-        // running average strategy by both the iteration number and the
-        // acting player's own reach probability.
+        regret_sum[i] = max(0.0, regret_sum[i]); // CFR+ flooring
+        // Linear-CFR averaging: weight by iteration number and own reach.
         strategy_sum[i] += (double)iteration * own_reach * strategy[i];
     }
 }
@@ -235,9 +164,8 @@ void Node::UpdateStrategy(const vector<bool> &possible_actions) {
     int n = 0;
     for (int i = 0; i < NUM_ACTIONS; i++) if (possible_actions[i]) n++;
 
-    // strategy[] is fully recomputed (zeroed for non-legal indices) every
-    // call, so it always corresponds exactly to THIS call's possible_actions
-    // - it never carries over mass from a different legal-action set.
+    // Fully recomputed each call (zeroed for illegal actions), so it never
+    // carries mass from a different legal-action set.
     for (int i = 0; i < NUM_ACTIONS; i++) {
         if (!possible_actions[i]) { strategy[i] = 0.0; continue; }
         strategy[i] = (normalising_sum == 0) ? 1.0 / (double)n : max(0.0, regret_sum[i] / normalising_sum);
@@ -256,8 +184,7 @@ vector<double> Node::GetFinalStrategy(const vector<bool> &possible_actions) {
     if (n == 0) return final_strategy; // no legal actions at all - shouldn't happen, but stay safe
 
     if (normalising_sum <= 0.0) {
-        // No accumulated weight yet (e.g. a freshly-created or rarely-visited
-        // node) - fall back to uniform over legal actions rather than NaN.
+        // No weight accumulated yet - fall back to uniform over legal actions.
         for (int i = 0; i < NUM_ACTIONS; i++) {
             final_strategy[i] = possible_actions[i] ? 1.0 / (double)n : 0.0;
         }

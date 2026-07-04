@@ -95,9 +95,7 @@ int main(int argc, char **argv) {
     return 0;
 }
 
-// game.cpp make_move and unmake_move tests
-    // By induction, we just have to show all game state properties are
-    // identical for one level of make-unmake
+// MakeMove/UnmakeMove round-trip: one level of make-unmake must be identical.
 void test_make_unmake(Game g) {
     if (g.bet_states.size() != 3 || g.bet_states[0].size() != 2) {
         cerr << "bet_states not initialised properly\n";
@@ -122,10 +120,7 @@ void test_make_unmake(Game g) {
     }
 }
 
-// Regression guard: GetFinalStrategy() is supposed to normalise over legal
-// actions, so every trained node's final strategy should sum to (very
-// nearly) 1 - catches normalisation bugs that would otherwise silently
-// corrupt the exported/served strategy.
+// Regression guard: every trained node's final strategy should sum to ~1.
 void test_strategy_sums_to_one(CFRSolver &cfr) {
     const double EPSILON = 1e-3;
     for (auto &entry : cfr.positionMap) {

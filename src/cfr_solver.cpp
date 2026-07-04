@@ -41,31 +41,19 @@ Node *CFRSolver::GetNode(const string &hash, const vector<bool> &possible_action
         positionMap.emplace(hash, new_node);
         return new_node;
     }
-    // Note: the bet-size abstraction (bucketed history mode) can in principle
-    // map two distinct concrete states onto the same hash, so the stored node's legality mask
-    // (set at creation time) may not exactly match every later visit's real
-    // possible_actions. That's fine - UpdateStrategy/UpdateRegret/GetFinalStrategy
-    // always take the CURRENT possible_actions as a parameter and never read
-    // the stored mask for live math, so a mismatch here can't corrupt the
-    // regret/strategy computation. Widening the stored mask on every visit
-    // used to seem like a safety improvement, but it actually broke CFR: it
-    // let strategy[] (built from the stored mask) spread mass onto actions
-    // illegal in the current state, making normalising_sum (summed over only
-    // the true legal set) collapse toward zero and chance = strategy[i]/norm
-    // blow up past 1, corrupting reach-probability weighting and producing
-    // NaN/astronomical values downstream.
+    // The stored legality mask may not match a later visit's real
+    // possible_actions; that's fine - live math always takes the current mask.
     return it->second;
 }
 
-// Only working for 2p
+// 2p only. Fixed player-0-perspective utilities (p1/p2 are the players' reach
+// probs); avoids the alternate-and-negate scheme that broke at street resets.
 double CFRSolver::CFR(Game &g, double p1, double p2) {
     if (g.terminal) {
-        return g.GetUtility();
+        return g.GetUtilityForPlayer0();
     }
 
-    // Captured before any MakeMove call below can mutate g.player - this is
-    // the player whose decision `chance` (and later, `strategy`) belongs to,
-    // and must stay fixed for the whole frame regardless of who acts next.
+    // Fixed before any MakeMove below can mutate g.player.
     int actingPlayer = g.player;
 
     vector<bool> possible_actions = g.GetActions(false);
@@ -84,6 +72,8 @@ double CFRSolver::CFR(Game &g, double p1, double p2) {
         if (possible_actions[i]) normalising_sum += strategy[i];
     }
 
+    // Player-0 utility, no per-child negation; only the acting player's reach
+    // picks up this action's chance.
     for (int i = 0; i < NUM_ACTIONS; i++) {
         if (!possible_actions[i]) continue;
 
@@ -91,22 +81,22 @@ double CFRSolver::CFR(Game &g, double p1, double p2) {
 
         g.MakeMove(i);
         if (actingPlayer == 0) {
-            action_val[i] = -CFR(g, p1 * chance, p2);
+            action_val[i] = CFR(g, p1 * chance, p2);
         } else {
-            action_val[i] = -CFR(g, p1, p2 * chance);
+            action_val[i] = CFR(g, p1, p2 * chance);
         }
         g.UnmakeMove();
         node_utility += action_val[i] * chance;
     }
 
+    // Regret is in the acting player's perspective (negated for player 1).
+    double perspective = (actingPlayer == 0) ? 1.0 : -1.0;
     vector<double> regrets(NUM_ACTIONS, 0.0);
     for (int i = 0; i < NUM_ACTIONS; i++) {
-        if (possible_actions[i]) regrets[i] = action_val[i] - node_utility;
+        if (possible_actions[i]) regrets[i] = perspective * (action_val[i] - node_utility);
     }
 
-    // Counterfactual regret is weighted by the OPPONENT's reach probability;
-    // the running average strategy is weighted by the ACTING player's own
-    // reach probability (standard vanilla-CFR formulation).
+    // Regret weighted by opponent reach; average strategy by own reach.
     if (actingPlayer == 0) {
         currentNode->UpdateRegret(regrets, possible_actions, /*opp_reach=*/p2, /*own_reach=*/p1, iteration);
     } else {
@@ -128,20 +118,26 @@ vector<double> CFRSolver::GetAverageStrategy(const string &hash, const vector<bo
     return it->second->GetFinalStrategy(possible_actions);
 }
 
+// Player-0-perspective value (same convention as CFR) with br_player playing
+// a best response and the opponent playing its trained average strategy.
 double CFRSolver::BestResponseValue(Game &g, int br_player) {
-    if (g.terminal) return g.GetUtility();
+    if (g.terminal) return g.GetUtilityForPlayer0();
 
     vector<bool> possible_actions = g.GetActions(false);
 
     if (g.player == br_player) {
-        double best = -1e18;
+        // Maximise br_player's own utility, but return the line's player-0 value.
+        double perspective = (br_player == 0) ? 1.0 : -1.0;
+        double bestOwn = -1e18, bestP0 = 0.0;
         for (int i = 0; i < NUM_ACTIONS; i++) {
             if (!possible_actions[i]) continue;
             g.MakeMove(i);
-            best = max(best, -BestResponseValue(g, br_player));
+            double childP0 = BestResponseValue(g, br_player);
             g.UnmakeMove();
+            double own = perspective * childP0;
+            if (own > bestOwn) { bestOwn = own; bestP0 = childP0; }
         }
-        return best;
+        return bestP0;
     } else {
         string hash = Node::GetHash(g);
         vector<double> strat = GetAverageStrategy(hash, possible_actions);
@@ -149,7 +145,7 @@ double CFRSolver::BestResponseValue(Game &g, int br_player) {
         for (int i = 0; i < NUM_ACTIONS; i++) {
             if (!possible_actions[i]) continue;
             g.MakeMove(i);
-            node_value += strat[i] * -BestResponseValue(g, br_player);
+            node_value += strat[i] * BestResponseValue(g, br_player);
             g.UnmakeMove();
         }
         return node_value;
@@ -165,9 +161,8 @@ double CFRSolver::EstimateExploitability(int num_samples) {
 
         Game g1(stack0, stack1, useBetSizeBuckets);
         g1.InitialiseGame(0);
-        // BestResponseValue returns utility for whoever is to act at the
-        // root (player 0, since first_to_act=0); negate to get player 1's
-        // own best-response value.
+        // BestResponseValue returns player-0 utility; player 1's own
+        // best-response value is its negation.
         br1_total += -BestResponseValue(g1, 1);
     }
     return (br0_total + br1_total) / (2.0 * num_samples);

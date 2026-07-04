@@ -1,21 +1,14 @@
-// RIPoker_Solver live viewer - talks to the embedded HTTP server (src/server.cpp)
-// to configure stacks, trigger training, and query the solver's current
-// in-memory strategy for any position.
+// RIPoker_Solver live viewer - talks to the embedded HTTP server to configure
+// stacks, train, and query the solver's current strategy for any position.
 
-// The bet/raise sizing grid is configurable on the backend (see game.cpp's
-// bet_sizings/raise_sizings), so the set and order of actions is fetched
-// from /api/actions (see loadActionConfig()) rather than hardcoded here.
-// Only Check/Call/Fold/Allin get a fixed color - every other action is
-// treated as a bet/raise and colored by interpolating across
-// --bet-ramp-start/--bet-ramp-end according to its rank among however many
-// bet/raise sizes are actually present.
+// Actions/order come from /api/actions (loadActionConfig). Check/Call/Fold
+// get a fixed color; bets/raises/all-in are colored by real chip size below.
 let ACTION_ORDER = [];
 let ACTION_LABELS = {};
 const FIXED_COLORS = {
   Check: 'var(--action-check)',
   Call: 'var(--action-call)',
   Fold: 'var(--action-fold)',
-  Allin: 'var(--action-allin)',
 };
 
 function hexToRgb(hex) {
@@ -33,24 +26,24 @@ function lerpHex(startHex, endHex, t) {
   return rgbToHex(a.map((v, i) => v + (b[i] - v) * t));
 }
 
-function actionColor(action) {
+// Colors a bet/raise/all-in by chip size, linear (y=mx+b) across the red ramp:
+// smallest present bet = red, largest (all-in) = darkest. `sizes`: action->chips.
+function actionColor(action, sizes) {
   if (FIXED_COLORS[action]) return FIXED_COLORS[action];
-  const rampActions = ACTION_ORDER.filter((a) => !FIXED_COLORS[a]);
-  const idx = rampActions.indexOf(action);
-  if (idx === -1) return '#888';
-  const t = rampActions.length > 1 ? idx / (rampActions.length - 1) : 0;
+  sizes = sizes || {};
+  const size = sizes[action];
+  if (size === undefined) return '#888';
+  const vals = Object.values(sizes);
+  const mn = Math.min(...vals), mx = Math.max(...vals);
+  const t = mx > mn ? (size - mn) / (mx - mn) : 0;
   const style = getComputedStyle(document.documentElement);
   const start = style.getPropertyValue('--bet-ramp-start').trim();
   const end = style.getPropertyValue('--bet-ramp-end').trim();
   return lerpHex(start, end, t);
 }
 
-// The backend reports the actual chip amount behind a bet/raise (replayed
-// from the real pot/bet_states at that position - see
-// Game::ReplayExactHistory) whenever it can, rather than the abstract sizing
-// name - show that real number instead of "Bet 50%"/"Raise 2.2x" wherever
-// it's available. Falls back to the abstract label if the backend couldn't
-// resolve a size (e.g. history recorded in bucketed rather than exact mode).
+// "Bet 40"/"Raise to 100" from the backend-provided chip size; falls back to
+// the abstract label ("Bet 50%") when no size was resolved (bucketed mode).
 function actionLabel(action, size) {
   if (size === undefined || size === null) return ACTION_LABELS[action];
   if (action[0] === 'B') return `Bet ${size}`;
@@ -58,9 +51,11 @@ function actionLabel(action, size) {
   return ACTION_LABELS[action];
 }
 
-// Real chip size behind each bet/raise at whichever position is currently
-// shown - the same for every hand there, so it's collected once in
-// renderPosition() and reused by the legend built from it.
+// Per-position context (aggressive-action sizes + the legal action set),
+// collected once in renderPosition() and shared by the bars and legend.
+let currentActionSizes = {};
+let currentPresent = new Set();
+
 function collectActionSizes(pos) {
   const sizes = {};
   for (const h of pos.hands) {
@@ -72,14 +67,17 @@ function collectActionSizes(pos) {
   return sizes;
 }
 
+function collectPresentActions(pos) {
+  const present = new Set();
+  for (const h of pos.hands) if (h) for (const s of h.strategy) present.add(s.action);
+  return present;
+}
+
 async function loadActionConfig() {
   const res = await fetch('/api/actions');
   const cfg = await res.json();
   ACTION_ORDER = cfg.actionOrder.slice();
-  // Allin is the largest possible action but the backend lists it right
-  // after Fold (it's grouped with the other "misc" actions there) - move it
-  // to the end so the bar/legend read left-to-right as: passive actions,
-  // then every bet/raise size in ascending order, then all-in.
+  // Move Allin to the end so bars/legend read passive -> bet sizes -> all-in.
   const allinIdx = ACTION_ORDER.indexOf('Allin');
   if (allinIdx !== -1) ACTION_ORDER.push(ACTION_ORDER.splice(allinIdx, 1)[0]);
   ACTION_LABELS = Object.assign({}, cfg.actionLabels);
@@ -103,16 +101,17 @@ function renderBar(strategy) {
     if (!prob || prob <= 0.001) continue;
     const pct = (prob * 100).toFixed(1);
     const label = actionLabel(action, sizeByAction.get(action));
-    html += `<div class="seg" style="width:${pct}%;background:${actionColor(action)}" data-tip="${label}: ${pct}%"></div>`;
+    html += `<div class="seg" style="width:${pct}%;background:${actionColor(action, currentActionSizes)}" data-tip="${label}: ${pct}%"></div>`;
   }
   html += '</div>';
   return html;
 }
 
-function buildLegend(actionSizes) {
+function buildLegend() {
   let html = '<div class="legend">';
   for (const action of ACTION_ORDER) {
-    html += `<span><span class="swatch" style="background:${actionColor(action)}"></span>${actionLabel(action, actionSizes[action])}</span>`;
+    if (!currentPresent.has(action)) continue;
+    html += `<span><span class="swatch" style="background:${actionColor(action, currentActionSizes)}"></span>${actionLabel(action, currentActionSizes[action])}</span>`;
   }
   html += '</div>';
   return html;
@@ -121,11 +120,14 @@ function buildLegend(actionSizes) {
 function renderPosition(pos) {
   document.getElementById('useBetSizeBuckets').checked = pos.useBetSizeBuckets;
 
+  currentActionSizes = collectActionSizes(pos);
+  currentPresent = collectPresentActions(pos);
+
   const board = pos.board.map((b) => b ?? '?').join('  ');
   const moneyLabel = `Pot: ${pos.pot} &middot; To call: ${pos.bet}`;
   let html = '';
   html += `<div class="position-meta"><b>${STAGE_NAMES[pos.stage] || '?'}</b> &middot; Board: ${board} &middot; ${moneyLabel} &middot; History: ${pos.history || '(none)'} &middot; total visits: ${pos.visits}</div>`;
-  html += buildLegend(collectActionSizes(pos));
+  html += buildLegend();
 
   // pos.hands is always 6 entries (index = hand value), each an object or null
   pos.hands.forEach((hand, i) => {
@@ -191,11 +193,8 @@ async function refreshCurrentPosition() {
   renderPosition(pos);
 }
 
-// Tracks the in-flight training run (if any) so Save/Cancel can stop it and
-// wait for the current chunk's request to actually finish before doing
-// anything else - the server has no locking around the shared solver state,
-// so a /api/configure Reset() running concurrently with an in-flight
-// /api/train batch would be a real race, not just a UX glitch.
+// Tracks the in-flight training run so Save/Cancel can stop it and wait -
+// the server has no locking, so a concurrent Reset() would be a real race.
 let trainingCancelRequested = false;
 let currentTrainingPromise = null;
 
@@ -205,13 +204,9 @@ async function runTraining(iterations) {
   const track = document.getElementById('trainProgressTrack');
   const fill = document.getElementById('trainProgressFill');
 
-  // Chunked into a series of smaller sequential requests so the progress bar
-  // and strategy bars refresh every CHUNK_SIZE hands, no matter how large the
-  // total run is. Cancellation itself doesn't depend on this chunking though -
-  // the server checks its own cancel flag every single TrainCFR() call (see
-  // src/server.cpp's /api/train), so a cancel takes effect within about one
-  // hand's training time even in the middle of a chunk, not just between them.
-  const CHUNK_SIZE = 200;
+  // Chunked so the progress bar and strategy bars refresh every CHUNK_SIZE
+  // hands. Cancellation is server-side per-hand, so it's near-instant anyway.
+  const CHUNK_SIZE = 25;
   const chunkSize = Math.min(CHUNK_SIZE, Math.max(1, iterations));
 
   btn.disabled = true;
@@ -247,9 +242,8 @@ async function runTraining(iterations) {
   }
 }
 
-// Shared by the Cancel button and Save: stops the current run (server-side,
-// so it takes effect immediately even mid-chunk) and waits for the
-// in-flight request to actually finish before the caller proceeds.
+// Cancel/Save helper: stops the current run (server-side) and waits for the
+// in-flight request to finish before the caller proceeds.
 async function cancelTraining(statusElId) {
   if (!currentTrainingPromise) return;
   trainingCancelRequested = true;
@@ -265,9 +259,7 @@ document.getElementById('cancelTrainBtn').addEventListener('click', () => {
 document.getElementById('saveStacksBtn').addEventListener('click', async () => {
   await cancelTraining('stacksStatus');
 
-  // Both players get the same stack - the solver still supports asymmetric
-  // stacks internally, but a single effective-stack figure is the only
-  // knob that matters for typical heads-up analysis.
+  // Both players get the same stack (single effective-stack knob).
   const stack = parseInt(document.getElementById('stack').value, 10);
   const useBetSizeBuckets = document.getElementById('useBetSizeBuckets').checked;
   setStatus('stacksStatus', 'Saving…');

@@ -36,22 +36,7 @@
 #define FOLD 2
 #define ALLIN 3
 
-#define STARTING_STACK 20
+#define STARTING_STACK 10
 
-/*
-    Actions:
-    - X Check (0)
-    - C Call (1)
-    - F Fold (2)
-    - A ALLIN (3)
-    BETS (indices MISC_ACTIONS .. MISC_ACTIONS+NUM_BETS-1)
-    - B50  (half pot)
-    - B100 (pot)
-    - B200 (2x pot)
-
-    RAISE (indices MISC_ACTIONS+NUM_BETS .. MISC_ACTIONS+NUM_BETS+NUM_RAISES-1)
-    - R2.2x
-    - R2.6x
-    - R3x
-    - R4x
-*/
+// Action indices: 0-3 Check/Call/Fold/Allin, then NUM_BETS bets (B50/B100/B200),
+// then NUM_RAISES raises (R2.2/R2.6/R3/R4). See move_names in game.cpp.

@@ -1,21 +1,14 @@
-// RIPoker_Solver viewer - loads solver_export.json (auto-fetch or manual file
-// picker) and lets you click through the solved tree the way a GTO trainer
-// does: pick an action, drill into the resulting node, repeat.
+// RIPoker_Solver viewer - loads solver_export.json and lets you click through
+// the solved tree: pick an action, drill into the resulting node, repeat.
 
-// The bet/raise sizing grid is configurable on the backend (see game.cpp's
-// bet_sizings/raise_sizings), so the set and order of actions is read from
-// data.actionOrder/data.actionLabels (populated in init()) rather than
-// hardcoded here. Only Check/Call/Fold/Allin get a fixed color - every other
-// action is treated as a bet/raise and colored by interpolating across
-// --bet-ramp-start/--bet-ramp-end according to its rank among however many
-// bet/raise sizes are actually present.
+// Actions/order come from data.actionOrder/actionLabels (set in init()).
+// Check/Call/Fold get a fixed color; bets/raises/all-in by chip size below.
 let ACTION_ORDER = [];
 let ACTION_LABELS = {};
 const FIXED_COLORS = {
   Check: 'var(--action-check)',
   Call: 'var(--action-call)',
   Fold: 'var(--action-fold)',
-  Allin: 'var(--action-allin)',
 };
 
 function hexToRgb(hex) {
@@ -33,24 +26,24 @@ function lerpHex(startHex, endHex, t) {
   return rgbToHex(a.map((v, i) => v + (b[i] - v) * t));
 }
 
-function actionColor(action) {
+// Colors a bet/raise/all-in by chip size, linear (y=mx+b) across the red ramp:
+// smallest present bet = red, largest (all-in) = darkest. `sizes`: action->chips.
+function actionColor(action, sizes) {
   if (FIXED_COLORS[action]) return FIXED_COLORS[action];
-  const rampActions = ACTION_ORDER.filter((a) => !FIXED_COLORS[a]);
-  const idx = rampActions.indexOf(action);
-  if (idx === -1) return '#888';
-  const t = rampActions.length > 1 ? idx / (rampActions.length - 1) : 0;
+  sizes = sizes || {};
+  const size = sizes[action];
+  if (size === undefined) return '#888';
+  const vals = Object.values(sizes);
+  const mn = Math.min(...vals), mx = Math.max(...vals);
+  const t = mx > mn ? (size - mn) / (mx - mn) : 0;
   const style = getComputedStyle(document.documentElement);
   const start = style.getPropertyValue('--bet-ramp-start').trim();
   const end = style.getPropertyValue('--bet-ramp-end').trim();
   return lerpHex(start, end, t);
 }
 
-// The backend reports the actual chip amount behind a bet/raise (replayed
-// from the real pot/bet_states at that position - see
-// Game::ReplayExactHistory) whenever it can, rather than the abstract sizing
-// name - show that real number instead of "Bet 50%"/"Raise 2.2x" wherever
-// it's available. Falls back to the abstract label if the backend couldn't
-// resolve a size (e.g. history recorded in bucketed rather than exact mode).
+// "Bet 40"/"Raise to 100" from the backend-provided chip size; falls back to
+// the abstract label ("Bet 50%") when no size was resolved (bucketed mode).
 function actionLabel(action, size) {
   if (size === undefined || size === null) return ACTION_LABELS[action];
   if (action[0] === 'B') return `Bet ${size}`;
@@ -58,11 +51,10 @@ function actionLabel(action, size) {
   return ACTION_LABELS[action];
 }
 
-// Real chip size behind each bet/raise at whichever node is currently
-// rendered - the same for every hand in that node, so it's collected once in
-// buildNodeCard() and reused by the legend/action buttons/picker built from
-// it, rather than threaded through every function's parameters.
+// Per-node context (collected once in buildNodeCard): aggressive-action chip
+// sizes, and the legal action set. Shared by bars/legend/buttons.
 let currentActionSizes = {};
+let currentPresent = new Set();
 
 function collectActionSizes(node) {
   const sizes = {};
@@ -72,6 +64,13 @@ function collectActionSizes(node) {
     }
   }
   return sizes;
+}
+
+// The node's legal action set - lets the legend drop bet sizes invalid here.
+function collectPresentActions(node) {
+  const present = new Set();
+  for (const h of node.hands) for (const s of h.strategy) present.add(s.action);
+  return present;
 }
 
 let data = null;
@@ -118,7 +117,7 @@ function renderBar(strategy) {
     if (!prob || prob <= 0.001) continue;
     const pct = (prob * 100).toFixed(1);
     const label = actionLabel(action, sizeByAction.get(action));
-    html += `<div class="seg" style="width:${pct}%;background:${actionColor(action)}" data-tip="${label}: ${pct}%"></div>`;
+    html += `<div class="seg" style="width:${pct}%;background:${actionColor(action, currentActionSizes)}" data-tip="${label}: ${pct}%"></div>`;
   }
   html += '</div>';
   return html;
@@ -128,8 +127,9 @@ function buildLegend() {
   const el = document.createElement('div');
   el.className = 'legend';
   for (const action of ACTION_ORDER) {
+    if (!currentPresent.has(action)) continue;
     const span = document.createElement('span');
-    span.innerHTML = `<span class="swatch" style="background:${actionColor(action)}"></span>${actionLabel(action, currentActionSizes[action])}`;
+    span.innerHTML = `<span class="swatch" style="background:${actionColor(action, currentActionSizes)}"></span>${actionLabel(action, currentActionSizes[action])}`;
     el.appendChild(span);
   }
   return el;
@@ -235,6 +235,7 @@ function navigateTo(label, node) {
 
 function buildNodeCard(node) {
   currentActionSizes = collectActionSizes(node);
+  currentPresent = collectPresentActions(node);
 
   const card = document.createElement('div');
   card.className = 'node-card';
@@ -297,10 +298,7 @@ function render() {
 function init(parsed) {
   data = parsed;
   ACTION_ORDER = data.actionOrder.slice();
-  // Allin is the largest possible action but the backend lists it right
-  // after Fold (it's grouped with the other "misc" actions there) - move it
-  // to the end so the bar/legend read left-to-right as: passive actions,
-  // then every bet/raise size in ascending order, then all-in.
+  // Move Allin to the end so bars/legend read passive -> bet sizes -> all-in.
   const allinIdx = ACTION_ORDER.indexOf('Allin');
   if (allinIdx !== -1) ACTION_ORDER.push(ACTION_ORDER.splice(allinIdx, 1)[0]);
   ACTION_LABELS = Object.assign({}, data.actionLabels);

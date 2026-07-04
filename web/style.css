@@ -13,15 +13,8 @@
   --action-allin: #4a148c;
   --action-check: #2e7d32;
 
-  /* Endpoints of the dark-red bet/raise ramp - app.js interpolates between
-     these across however many bet/raise sizes the backend reports (the set
-     is variable, not fixed to a specific count), so the smallest is this
-     start color and the largest is this end color, in ascending order of
-     aggression. Stays in the red family, just deepening (with only a slight
-     maroon undertone) as size grows. Not run through the automated CVD
-     validator (internal tool, not public-facing) - color is always paired
-     with a visible text label in the legend/tooltip, so identity never
-     depends on color alone. */
+  /* Endpoints of the dark-red bet/raise ramp; app.js interpolates by chip
+     size, smallest bet = start, largest (all-in) = end. */
   --bet-ramp-start: #a51c1c;
   --bet-ramp-end: #3f170f;
 

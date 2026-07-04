@@ -44,9 +44,7 @@ void WriteJSONString(ostream &out, const string &s) {
     out << '"';
 }
 
-// Minimal flat-object int extractor - the request bodies this server accepts
-// are always simple {"key": 123, ...} objects, so a full JSON parser is
-// unnecessary.
+// Minimal int extractor for flat {"key": 123} request bodies.
 int ExtractJSONInt(const string &body, const string &key, int def) {
     string needle = "\"" + key + "\"";
     size_t pos = body.find(needle);
@@ -62,8 +60,7 @@ int ExtractJSONInt(const string &body, const string &key, int def) {
     return stoi(body.substr(start, pos - start));
 }
 
-// Same flat-object assumption as ExtractJSONInt - JSON booleans are the bare
-// words true/false, no quoting to strip.
+// Bare true/false extractor for flat request bodies.
 bool ExtractJSONBool(const string &body, const string &key, bool def) {
     string needle = "\"" + key + "\"";
     size_t pos = body.find(needle);
@@ -83,16 +80,8 @@ struct BestMatch {
     Node *node = nullptr;
 };
 
-// Answers "what's the strategy at position X". The caller specifies
-// stage/board/history; the money state (pot, facing bet) that the infoset key
-// now depends on is recovered by replaying the exact history (see
-// Game::ReplayExactHistory), which reproduces the same pot/bet the trainer
-// hashed with. Flush category still isn't pinned down by a position query
-// (it depends on the concrete suits), so those 1-4 variants are scanned per
-// hand value and the most-visited match wins - the same tie-break used for
-// reporting elsewhere. If the history can't be replayed (e.g. it was recorded
-// in bucketed rather than exact bet-size mode, so no exact chip amounts
-// exist), the money state is unknown and every hand comes back null.
+// Strategy at a position. pot/bet come from replaying the exact history (else
+// null hands); flush variants are scanned per hand, most-visited wins.
 string BuildPositionJSON(CFRSolver &cfr, int stage, int board0Val, int board1Val, const string &history) {
     const int numHandValues = NUM_CARDS / 4;
     vector<BestMatch> bestPerHand(numHandValues);
@@ -102,9 +91,7 @@ string BuildPositionJSON(CFRSolver &cfr, int stage, int board0Val, int board1Val
     int pot = replayOk ? replayed.KeyPot() : 0;
     int bet = replayOk ? replayed.KeyBet() : 0;
 
-    // Actual chip amount behind each currently-offered bet/raise at this
-    // position, using the same bases MakeMove sizes against (committed pot for
-    // bets, the facing bet for raises).
+    // Chip amount per offered bet/raise/all-in (same bases MakeMove uses).
     unordered_map<string, int> actionChipSize;
     if (replayOk) {
         for (int dx = 0; dx < NUM_BETS; dx++) {
@@ -114,6 +101,8 @@ string BuildPositionJSON(CFRSolver &cfr, int stage, int board0Val, int board1Val
         for (int dx = 0; dx < NUM_RAISES; dx++) {
             actionChipSize[move_names[MISC_ACTIONS + NUM_BETS + dx]] = (int)(raise_sizings[dx] * facing);
         }
+        // All-in = whole remaining stack (largest bet -> darkest on the ramp).
+        actionChipSize["Allin"] = replayed.effective_stack[replayed.player];
     }
 
     if (replayOk) {
@@ -184,23 +173,14 @@ void Start(CFRSolver &cfr, int port) {
     httplib::Server svr;
     mt19937 rng(random_device{}());
 
-    // This is a local dev tool whose static files change frequently during
-    // development - disable caching so a browser refresh always picks up
-    // the latest index.html/app.js/style.css instead of a stale copy.
+    // Local dev tool - no caching so a refresh always picks up the latest files.
     svr.set_default_headers({{"Cache-Control", "no-store"}});
     svr.set_mount_point("/", "./web-live");
 
-    // Shared between /api/train (runs on whichever thread handles that
-    // request) and /api/train/cancel (runs on a different thread while the
-    // former is still in flight) - atomic so setting/checking it across
-    // threads is well-defined without a full mutex for a single flag.
+    // Shared with /api/train/cancel on another thread; atomic avoids a mutex.
     atomic<bool> cancelRequested{false};
 
-    // Static config, fetched once by the frontend at page load: which actions
-    // exist, in what order, and their display labels. move_names is the
-    // single source of truth (bet/raise sizings are configurable in
-    // game.cpp), so the frontend reads this instead of hardcoding its own
-    // action list.
+    // Static action config (order + labels) fetched once by the frontend.
     svr.Get("/api/actions", [&](const httplib::Request &, httplib::Response &res) {
         ostringstream out;
         out << "{\n  \"actionOrder\": [";

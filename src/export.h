@@ -4,8 +4,7 @@
 class CFRSolver;
 
 namespace Export {
-    // Groups the trained positionMap by decision point (dropping hole-card
-    // identity) and writes it as JSON for the web viewer. Only node-groups
-    // with at least minVisits total visits are included.
+    // Groups positionMap by decision point and writes JSON for the web viewer
+    // (only groups with >= minVisits total visits).
     void WriteSolverJSON(CFRSolver &cfr, const std::string &path, int minVisits);
 }

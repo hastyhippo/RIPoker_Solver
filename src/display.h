@@ -18,21 +18,14 @@ namespace Display {
     // every possible hole card, lowest to highest.
     void PrintPreflopStrategy(CFRSolver &cfr);
 
-    // Interactive-play helpers. PrintBoard only shows cards that have
-    // actually been dealt as of g.stage - never reveals future cards.
-    // (Game/Card aren't const-correct anywhere in this codebase, so these
-    // take a plain reference rather than introducing const just here.)
+    // Interactive-play helpers. PrintBoard only shows cards dealt as of g.stage.
     void PrintBoard(Game &g, int humanPlayer);
     void PrintActionMenu(const std::vector<bool> &actions, Game &g);
     void PrintHandResult(Game &g, int humanPlayer, int utilityForActingPlayer);
 
-    // Prints the solver's time-averaged ("optimal") strategy for the current
-    // decision point, restricted to legal actions - used during interactive
-    // play so the human can see what the trained strategy recommends here.
+    // The trained strategy at the current decision point, legal actions only.
     void PrintOptimalStrategy(const std::vector<double> &strategy, const std::vector<bool> &possible_actions, bool isHumanTurn);
 
-    // Translates a raw move_names entry ("B200", "R2.2", ...) into a clearer
-    // label for display (the raw form stays the stable identifier used for
-    // legality-array indexing/color-keying elsewhere).
+    // Human label for a raw move_names entry (which stays the stable key).
     std::string ActionDisplayLabel(const std::string &moveName);
 }

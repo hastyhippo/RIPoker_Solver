@@ -24,11 +24,7 @@ namespace {
     const string RED      = "\033[31m";
     const string BLUE     = "\033[34m";
 
-    // move_names' raw entries ("B50", "R2.2", ...) are used as stable keys
-    // elsewhere (the web viewers key colors off these exact strings), so
-    // rather than rename them, translate to a clearer label only where text
-    // is actually shown to a user - spelling out the ratio instead of the
-    // abbreviated code.
+    // Human label for a raw move_names entry (kept as-is since it's a stable key).
     string DisplayLabel(const string &moveName) {
         if (moveName == "B50") return "Bet 50%";
         if (moveName == "B100") return "Bet 100%";
@@ -42,8 +38,7 @@ namespace {
     }
 
     string RankName(int value) {
-        // Reuses Card::getName() (suit 0 = Spades) so labelling stays
-        // consistent with the rest of the codebase, then strips the suit.
+        // Reuses Card::getName(), then strips the suit.
         Card c(value * 4);
         string name = c.getName();
         return name.substr(0, name.find(" of"));
@@ -82,8 +77,7 @@ namespace {
         return s;
     }
 
-    // Percent-formats a pot-fraction threshold with no trailing decimals
-    // when it's a whole number (e.g. 0.5 -> "50", 0.55 -> "55").
+    // Pot-fraction as a whole-number percent (0.5 -> "50").
     string Pct(double frac) {
         ostringstream ss;
         ss << (int)round(frac * 100);
@@ -98,8 +92,7 @@ namespace {
         return s;
     }
 
-    // Translates one abstractHistory character (see Node::GetHash's comment
-    // block for the encoding) into a human-readable action description.
+    // One bucketed abstractHistory character -> human-readable action.
     string ActionLetterName(char c) {
         switch (c) {
             case '0': return "Check";
@@ -125,10 +118,8 @@ namespace {
         return string(1, c);
     }
 
-    // Expands the compact abstractHistory code (e.g. "07AA,0") into a full,
-    // street-by-street, human-readable action sequence. Handles both the
-    // bucketed single-character alphabet and the exact-bet-sizing tokens
-    // ("[N]" for a bet of exactly N chips, "{N}" for a raise to exactly N).
+    // Expands abstractHistory into a street-by-street action sequence
+    // (handles both bucketed letters and exact "[N]"/"{N}" tokens).
     string DecodeAbstractHistory(const string &hist) {
         if (hist.empty()) return "(no actions yet this street)";
 
@@ -230,9 +221,7 @@ void PrintPreflopStrategy(CFRSolver &cfr) {
          << DIM << "  (first action of the hand, by hole card)" << RESET << "\n";
     cout << BOLD << YELLOW << Line() << RESET << "\n";
 
-    // One slot per hole card value; keep whichever node (there should only
-    // ever be one at a fixed starting stack) has the most visits, defensively
-    // in case the money-state key ever splits the opening decision.
+    // One slot per hole card value; keep the most-visited node per value.
     int numHandValues = NUM_CARDS / 4;
     vector<pair<string, Node*>> best(numHandValues, {"", nullptr});
 
@@ -296,10 +285,7 @@ void PrintActionMenu(const vector<bool> &actions, Game &g) {
     for (int i = 0; i < NUM_ACTIONS; i++) {
         if (!actions[i]) continue;
         cout << "  " << BOLD << i << RESET << ") ";
-        // Leads with the exact chip amount here (unlike the aggregate
-        // strategy reports, which have no single pot to compute one from) -
-        // more directly useful than the abstracted "B200"-style label when
-        // there's a real, current pot to size against.
+        // Leads with the exact chip amount (there's a real pot to size against).
         if (i >= MISC_ACTIONS && i < MISC_ACTIONS + NUM_BETS) {
             cout << "Bet " << (int)(g.pot * bet_sizings[i - MISC_ACTIONS]) << " chips"
                  << DIM << "  (" << DisplayLabel(move_names[i]) << ")" << RESET;
