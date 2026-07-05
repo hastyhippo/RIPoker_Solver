@@ -279,12 +279,6 @@ async function refreshCurrentPosition() {
   renderPosition(pos);
 }
 
-// Yields a real macrotask so the browser can paint and handle input between
-// training chunks. In WASM mode each chunk runs synchronously on the main
-// thread, so an `await` on a resolved promise is only a microtask - the browser
-// drains all microtasks before rendering or dispatching clicks, leaving the UI
-// (Cancel, Look up, typing) frozen for the whole run. A macrotask hands control
-// back. MessageChannel avoids setTimeout's ~4ms clamp; both are fallbacks.
 const _yieldChannel = typeof MessageChannel !== 'undefined' ? new MessageChannel() : null;
 function yieldToBrowser() {
   if (window.scheduler && typeof window.scheduler.yield === 'function') return window.scheduler.yield();
