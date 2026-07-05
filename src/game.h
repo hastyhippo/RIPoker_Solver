@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <stack>
 #include <vector>
+#include <cstdint>
 class CFRSolver;
 
 #include "deck.h"
@@ -14,6 +15,17 @@ using namespace std;
 extern vector<double> bet_sizings;
 extern vector<double> raise_sizings;
 extern vector<string> move_names;
+
+// One step of a replayed position: a decision point (legal moves, resolved
+// chip sizes, which was taken) or a board-card reveal between streets.
+struct TrailStep {
+    bool isReveal;        // true = board reveal, false = decision point
+    int revealSlot;       // 0 = flop card, 1 = turn card (reveals only)
+    int player;           // acting player at a decision
+    int chosen;           // move_type taken; -1 at the live (last) decision
+    vector<int> legal;    // legal move_type indices at this point
+    vector<int> chipSize; // chips per legal entry; -1 when not applicable
+};
 
 // One moveHistory entry, exactly what UnmakeMove needs. Chips covers
 // check/call/bet/raise/all-in; StreetClose marks the pot bump + stage++.
@@ -66,4 +78,8 @@ class Game {
         // Replays an exact-mode history on a fresh Game to recover the real
         // pot/bet_states; sets ok=false if a token can't be decoded exactly.
         static Game ReplayExactHistory(int stack0, int stack1, const string &history, bool &ok);
+
+        // Replays a history into a step-by-step trail (decisions + reveals);
+        // the last step is the live decision point (chosen = -1).
+        static vector<TrailStep> BuildTrail(int stack0, int stack1, const string &history, bool &ok);
 };

@@ -117,14 +117,42 @@ function buildLegend() {
   return html;
 }
 
+// The action tree: one block of legal moves per decision (chosen one filled),
+// vertical dividers between steps, card chips at reveals, live node outlined.
+function renderTrail(trail) {
+  let html = '<div class="trail">';
+  trail.forEach((step, idx) => {
+    if (idx > 0) html += '<div class="trail-divider"></div>';
+    if (step.type === 'card') {
+      html += `<div class="trail-card">Card: ${step.card ?? '?'}</div>`;
+      return;
+    }
+    const isCurrent = step.chosen === null;
+    html += `<div class="trail-block${isCurrent ? ' current' : ''}" title="Player ${step.player} ${isCurrent ? '(to act)' : 'acted'}">`;
+    for (const a of step.actions) {
+      const cls = step.chosen === a.action ? ' chosen' : '';
+      html += `<div class="trail-move${cls}">${actionLabel(a.action, a.size)}</div>`;
+    }
+    html += '</div>';
+  });
+  html += '</div>';
+  return html;
+}
+
 function renderPosition(pos) {
   currentActionSizes = collectActionSizes(pos);
   currentPresent = collectPresentActions(pos);
 
-  const board = pos.board.map((b) => b ?? '?').join('  ');
   const moneyLabel = `Pot: ${pos.pot} &middot; To call: ${pos.bet}`;
   let html = '';
-  html += `<div class="position-meta"><b>${STAGE_NAMES[pos.stage] || '?'}</b> &middot; Board: ${board} &middot; ${moneyLabel} &middot; History: ${pos.history || '(none)'} &middot; total visits: ${pos.visits}</div>`;
+  html += `<div class="position-meta"><b>${STAGE_NAMES[pos.stage] || '?'}</b> &middot; ${moneyLabel} &middot; total visits: ${pos.visits}</div>`;
+  if (pos.trail) {
+    html += renderTrail(pos.trail);
+  } else {
+    // Unreplayable history: fall back to the raw text form.
+    const board = pos.board.map((b) => b ?? '?').join('  ');
+    html += `<div class="position-meta">Board: ${board} &middot; History: ${pos.history || '(none)'}</div>`;
+  }
   html += buildLegend();
 
   // pos.hands is always 6 entries (index = hand value), each an object or null
@@ -319,8 +347,10 @@ function fmtIter(n) {
   return n >= 1000 ? n / 1000 + 'K' : String(n);
 }
 
-// 1/2/5 stepping for clean axis ticks.
+// 1/2/5 stepping for clean axis ticks. Never returns 0 (a zero step would
+// spin the tick loops forever), so a zero/empty range falls back to 1.
 function niceStep(range, targetTicks) {
+  if (!(range > 0)) return 1;
   const raw = range / Math.max(1, targetTicks);
   const mag = Math.pow(10, Math.floor(Math.log10(raw)));
   for (const m of [1, 2, 5, 10]) if (raw <= m * mag) return m * mag;
@@ -341,7 +371,8 @@ function renderExploitChart() {
   const iw = W - M.l - M.r;
   const ih = H - M.t - M.b;
 
-  const maxIter = exploitPoints[exploitPoints.length - 1].iter;
+  // Baseline-only series (just iteration 0): leave x-room for the next point.
+  const maxIter = exploitPoints[exploitPoints.length - 1].iter || 1000;
   const maxVal = Math.max(...exploitPoints.map((p) => p.value), 0);
   const yStep = niceStep(maxVal || 1, 3);
   const yMax = Math.max(yStep, Math.ceil((maxVal || 1) / yStep) * yStep);

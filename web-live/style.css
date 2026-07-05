@@ -163,15 +163,11 @@ body {
   flex: 1 1 auto;
   min-height: 0;       /* allow the flex child to shrink so overflow works */
   overflow-y: auto;
+  scrollbar-width: none;    /* still scrolls; no visible bar */
 }
-.strategy-panel .panel-title {
-  font-weight: 600;
-  margin-bottom: 10px;
-  position: sticky;
-  top: 0;
-  background: var(--surface-1);
-  padding-bottom: 4px;
-}
+.strategy-panel::-webkit-scrollbar { display: none; }
+.trail { scrollbar-width: none; }
+.trail::-webkit-scrollbar { display: none; }
 
 /* ------- Exploitability chart panel ------- */
 .exploit-panel {
@@ -311,6 +307,58 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   margin-bottom: 10px;
 }
 .position-meta b { color: var(--text-primary); }
+
+/* ------- Action trail (visual line history) ------- */
+.trail {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 12px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+.trail-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 2px 5px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  flex: 0 0 auto;
+}
+/* The live decision the strategy table is showing */
+.trail-block.current {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.trail-move {
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text-secondary);
+  padding: 0 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.trail-move.chosen {
+  background: var(--accent);
+  color: #fff;
+}
+.trail-divider {
+  width: 1px;
+  align-self: stretch;
+  background: var(--gridline);
+  flex: 0 0 auto;
+}
+.trail-card {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-primary);
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
 
 .hand-row {
   display: flex;

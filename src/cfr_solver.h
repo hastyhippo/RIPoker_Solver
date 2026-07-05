@@ -39,8 +39,13 @@ class CFRSolver {
         // opponent's average strategy and range. Returns br_player's own EV.
         double ExactBestResponseValue(int br_player);
 
-        // Exact exploitability (avg of both BR gains), chips/hand; 0 at equilibrium.
-        double ComputeExploitability();
+        // Exploitability (avg of both BR gains), chips/hand; ~0 at equilibrium.
+        // chanceSamples > 0 Monte-Carlo samples that many board cards per
+        // reveal (fast, small upward bias); 0 branches every card exactly.
+        double ComputeExploitability(int chanceSamples = 0);
+
+        // Board cards sampled per reveal during a BR walk (0 = branch all).
+        int brChanceSamples = 0;
 
         // BR recursion helpers (see .cpp): V[brCard] = range-weighted EV sums.
         vector<double> BRWalk(Game &g, int br_player, const vector<double> &oppReach, int b0, int b1);

@@ -152,7 +152,24 @@ vector<bool> Game::GetActions(bool print) {
         // allin always available
         if(effective_stack[1 - player] > 0 && effective_stack[player] > 0) {
             actions[ALLIN] = true;
-        }    
+        }
+    } else if (bet_states[stage][player] == bet_states[stage][1 - player]) {
+        // Preflop option after OOP's limp: IP may check it back or raise.
+        actions[CHECK] = true;
+
+        unordered_map<int, int> values;
+        for (int dx = 0; dx < NUM_RAISES; dx++) {
+            int i = MISC_ACTIONS + NUM_BETS + dx;
+            int raise_size = bet_states[stage][1 - player] * raise_sizings[dx];
+            int extra_chips = raise_size - bet_states[stage][player];
+            if (values.count(raise_size) == 0 && extra_chips < effective_stack[player] && extra_chips > 0) {
+                values[raise_size]++;
+                actions[i] = true;
+            }
+        }
+        if(effective_stack[1 - player] > 0 && effective_stack[player] > 0) {
+            actions[ALLIN] = true;
+        }
     } else {
         // Facing a bet/raise - Fold/Call always available
         actions[FOLD] = true;
@@ -199,9 +216,14 @@ void Game::MakeMove(int move_type) {
     assert(terminal == false);
 
     if (move_type == CHECK) {
-        // if last move is also a check, skip to next stage
-        if (!moveHistory.empty() &&
-        moveHistory.back().kind == Move::Chips && moveHistory.back().amount == 0) {
+        // Closes the street on check-behind, or on checking the preflop
+        // option back (bets matched and nonzero after OOP's limp).
+        bool checkedBehind = !moveHistory.empty() &&
+            moveHistory.back().kind == Move::Chips && moveHistory.back().amount == 0;
+        bool limpOption = bet_states[stage][player] > 0 &&
+            bet_states[stage][player] == bet_states[stage][1 - player];
+        if (checkedBehind || limpOption) {
+            pot += bet_states[stage][0] + bet_states[stage][1]; // 0 unless limp option
             stage++;
             update_stage = true;
         }
@@ -214,6 +236,10 @@ void Game::MakeMove(int move_type) {
         abstractHistory += 'f';
     }
     else if (move_type == CALL) {
+        // OOP's opening limp (first move of the hand) matches IP's ante-raise
+        // without closing preflop: IP keeps the option to check or raise.
+        bool openingLimp = stage == PREFLOP && moveHistory.empty();
+
         // Capped at own remaining stack (short all-in call). No side-pot
         // accounting: uncontested excess still lands in the shared pot.
         int call_size = min(bet_states[stage][1 - player] - bet_states[stage][player], effective_stack[player]);
@@ -223,16 +249,18 @@ void Game::MakeMove(int move_type) {
         effective_stack[player] -= call_size;
         bet_states[stage][player] += call_size;
 
-        // End state - increase pot size
-        pot += bet_states[stage][0] + bet_states[stage][1];
+        // The option needs both players able to act; a limp that leaves
+        // either side all-in closes the street like any other call.
+        if (!(openingLimp && effective_stack[0] > 0 && effective_stack[1] > 0)) {
+            // End state - increase pot size
+            pot += bet_states[stage][0] + bet_states[stage][1];
+            stage++;
+            update_stage = true;
 
-        // Calling will always end action for 2p
-        stage++;
-        update_stage = true;
-
-        // If either player is all-in, no further betting is possible
-        if (effective_stack[0] == 0 || effective_stack[1] == 0) {
-            terminal = true;
+            // If either player is all-in, no further betting is possible
+            if (effective_stack[0] == 0 || effective_stack[1] == 0) {
+                terminal = true;
+            }
         }
     } else if (move_type == ALLIN) {
         // equivalent of betting whole stack
@@ -328,53 +356,114 @@ void Game::UnmakeMove() {
     effective_stack[player] += last.amount;
 }
 
+namespace {
+
+// Decodes one exact-history token into a move index for g's current state
+// and advances i past it. Sets ok=false when a token can't be decoded.
+int DecodeToken(Game &g, const string &history, size_t &i, bool &ok) {
+    char c = history[i];
+    int move_type = -1;
+    size_t tokenLen = 1;
+    if (c == '0') {
+        move_type = CHECK;
+    } else if (c == 'f') {
+        move_type = FOLD;
+    } else if (c == 'c') {
+        move_type = CALL;
+    } else if (c == 'a') {
+        move_type = ALLIN;
+    } else if (c == '[') {
+        size_t end = history.find(']', i);
+        if (end == string::npos) { ok = false; return -1; }
+        int amt = stoi(history.substr(i + 1, end - i - 1));
+        tokenLen = end - i + 1;
+        for (int dx = 0; dx < NUM_BETS; dx++) {
+            if ((int)(bet_sizings[dx] * g.pot) == amt) { move_type = MISC_ACTIONS + dx; break; }
+        }
+    } else if (c == '{') {
+        size_t end = history.find('}', i);
+        if (end == string::npos) { ok = false; return -1; }
+        int amt = stoi(history.substr(i + 1, end - i - 1));
+        tokenLen = end - i + 1;
+        int facing = g.bet_states[g.stage][1 - g.player];
+        for (int dx = 0; dx < NUM_RAISES; dx++) {
+            if ((int)(raise_sizings[dx] * facing) == amt) { move_type = MISC_ACTIONS + NUM_BETS + dx; break; }
+        }
+    } else {
+        ok = false;
+        return -1;
+    }
+
+    if (move_type == -1) { ok = false; return -1; }
+    i += tokenLen;
+    return move_type;
+}
+
+// Snapshot of g's live decision point: legal moves + resolved chip sizes.
+TrailStep DecisionStepFor(Game &g) {
+    TrailStep s;
+    s.isReveal = false;
+    s.revealSlot = -1;
+    s.player = g.player;
+    s.chosen = -1;
+    vector<bool> acts = g.GetActions(false);
+    int facing = g.bet_states[g.stage][1 - g.player];
+    for (int m = 0; m < NUM_ACTIONS; m++) {
+        if (!acts[m]) continue;
+        int size = -1;
+        if (m == ALLIN) size = g.effective_stack[g.player];
+        else if (m >= MISC_ACTIONS && m < MISC_ACTIONS + NUM_BETS) size = (int)(bet_sizings[m - MISC_ACTIONS] * g.pot);
+        else if (m >= MISC_ACTIONS + NUM_BETS) size = (int)(raise_sizings[m - (MISC_ACTIONS + NUM_BETS)] * facing);
+        s.legal.push_back(m);
+        s.chipSize.push_back(size);
+    }
+    return s;
+}
+
+} // namespace
+
 Game Game::ReplayExactHistory(int stack0, int stack1, const string &history, bool &ok) {
     Game g(stack0, stack1);
     g.InitialiseGame(0);
     ok = true;
 
     size_t i = 0;
-    while (i < history.size()) {
-        char c = history[i];
-        if (c == ',') { i++; continue; } // street transition, not its own token
-
-        int move_type = -1;
-        size_t tokenLen = 1;
-        if (c == '0') {
-            move_type = CHECK;
-        } else if (c == 'f') {
-            move_type = FOLD;
-        } else if (c == 'c') {
-            move_type = CALL;
-        } else if (c == 'a') {
-            move_type = ALLIN;
-        } else if (c == '[') {
-            size_t end = history.find(']', i);
-            if (end == string::npos) { ok = false; break; }
-            int amt = stoi(history.substr(i + 1, end - i - 1));
-            tokenLen = end - i + 1;
-            for (int dx = 0; dx < NUM_BETS; dx++) {
-                if ((int)(bet_sizings[dx] * g.pot) == amt) { move_type = MISC_ACTIONS + dx; break; }
-            }
-        } else if (c == '{') {
-            size_t end = history.find('}', i);
-            if (end == string::npos) { ok = false; break; }
-            int amt = stoi(history.substr(i + 1, end - i - 1));
-            tokenLen = end - i + 1;
-            int facing = g.bet_states[g.stage][1 - g.player];
-            for (int dx = 0; dx < NUM_RAISES; dx++) {
-                if ((int)(raise_sizings[dx] * facing) == amt) { move_type = MISC_ACTIONS + NUM_BETS + dx; break; }
-            }
-        } else {
-            // Bucketed single-letter token - no exact chip amount to recover.
-            ok = false;
-            break;
-        }
-
-        if (move_type == -1) { ok = false; break; }
+    while (i < history.size() && ok) {
+        if (history[i] == ',') { i++; continue; } // street transition, not its own token
+        int move_type = DecodeToken(g, history, i, ok);
+        if (!ok) break;
         g.MakeMove(move_type);
-        i += tokenLen;
     }
-
     return g;
+}
+
+vector<TrailStep> Game::BuildTrail(int stack0, int stack1, const string &history, bool &ok) {
+    Game g(stack0, stack1);
+    g.InitialiseGame(0);
+    ok = true;
+    vector<TrailStep> trail;
+
+    size_t i = 0;
+    while (i < history.size() && ok && !g.terminal) {
+        if (history[i] == ',') { i++; continue; }
+        TrailStep step = DecisionStepFor(g);
+        int stageBefore = g.stage;
+        int move_type = DecodeToken(g, history, i, ok);
+        if (!ok) break;
+        step.chosen = move_type;
+        trail.push_back(step);
+        g.MakeMove(move_type);
+        // A street close reveals the next board card between decisions.
+        if (!g.terminal && g.stage != stageBefore) {
+            TrailStep reveal;
+            reveal.isReveal = true;
+            reveal.revealSlot = g.stage - 1;
+            reveal.player = -1;
+            reveal.chosen = -1;
+            trail.push_back(reveal);
+        }
+    }
+    // The last step is the live decision the strategy table is showing.
+    if (ok && !g.terminal) trail.push_back(DecisionStepFor(g));
+    return trail;
 }

@@ -1,6 +1,8 @@
-# Compiler and flags
+# Compiler and flags (-MMD -MP emit header deps so .o files rebuild
+# when an included .h changes, not only when the .cpp does)
 CXX = g++
-CXXFLAGS = -Wall -std=c++17 -I./src
+# -pthread is required on Linux (std::async, httplib); harmless on macOS.
+CXXFLAGS = -Wall -std=c++17 -O2 -pthread -I./src -MMD -MP
 
 # Executable name
 TARGET = poker_solver
@@ -16,12 +18,15 @@ all: $(TARGET)
 
 # Link the object files to create executable
 $(TARGET): $(OBJS)
-	$(CXX) $(OBJS) -o $(TARGET)
+	$(CXX) $(OBJS) -pthread -o $(TARGET)
 
 # Compile .cpp to .o
 src/%.o: src/%.cpp
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
+# Pull in the generated header dependency files
+-include $(OBJS:.o=.d)
+
 # Clean up build files
 clean:
-	rm -f $(TARGET) src/*.o
+	rm -f $(TARGET) src/*.o src/*.d

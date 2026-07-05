@@ -1,0 +1,64 @@
+name: Deploy to GitHub Pages
+
+# Builds the C++ solver, trains it, exports the strategy JSON, and publishes
+# the static viewer (web/ + solver_export.json) via GitHub's official Pages
+# actions. No gh-pages branch and nothing large is committed to git history:
+# the site is uploaded as an ephemeral Pages artifact.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      train_hands:
+        description: "Hands to train before exporting the strategy"
+        default: "100000"
+
+# Permissions the official deploy-pages action needs.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deploy at a time; don't cancel an in-progress publish.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build solver
+        run: make
+
+      # The CLI trains, self-tests, then writes solver_export.json.
+      # min-visits 100 keeps the published JSON small and noise-free.
+      - name: Train and export strategy data
+        run: printf '%s\n0\nn\n' "${{ github.event.inputs.train_hands || '100000' }}" | ./poker_solver --export-min-visits 100
+
+      - name: Assemble site (viewer + fresh export)
+        run: |
+          mkdir _site
+          cp -r web/. _site/
+          cp solver_export.json _site/
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./_site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

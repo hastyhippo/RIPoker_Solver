@@ -18,7 +18,7 @@ void test_strategy_sums_to_one(CFRSolver &cfr);
 
 namespace {
     const long long PROGRESS_EVERY_N_HANDS = 100;
-    const long long EXPLOIT_EVERY_N_HANDS = 500;
+    const long long EXPLOIT_EVERY_N_HANDS = 10000;
     const int TOP_NODES_FOR_REPORT = 25;
     const int MIN_VISITS_FOR_EXPORT = 5;
     const char *EXPORT_PATH = "solver_export.json";
@@ -32,6 +32,10 @@ void Initialise() {
 int main(int argc, char **argv) {
     Initialise();
 
+    // Nodes below this many visits are dropped from the JSON export
+    // (--export-min-visits N trims size for published artifacts).
+    int exportMinVisits = MIN_VISITS_FOR_EXPORT;
+
     for (int i = 1; i < argc; i++) {
         if (string(argv[i]) == "--serve") {
             int port = (i + 1 < argc) ? atoi(argv[i + 1]) : DEFAULT_SERVE_PORT;
@@ -39,6 +43,10 @@ int main(int argc, char **argv) {
             CFRSolver cfr;
             Server::Start(cfr, port);
             return 0;
+        }
+        if (string(argv[i]) == "--export-min-visits" && i + 1 < argc) {
+            int v = atoi(argv[i + 1]);
+            if (v > 0) exportMinVisits = v;
         }
     }
 
@@ -76,7 +84,7 @@ int main(int argc, char **argv) {
     test_strategy_sums_to_one(cfr);
     cout << "Verified: strategies sum to 1 across " << cfr.positionMap.size() << " trained nodes.\n";
 
-    Export::WriteSolverJSON(cfr, EXPORT_PATH, MIN_VISITS_FOR_EXPORT);
+    Export::WriteSolverJSON(cfr, EXPORT_PATH, exportMinVisits);
     cout << "Exported solver data to " << EXPORT_PATH << " (open web/index.html to browse it)\n";
 
     cout << "Play against the trained solver? (y/n): ";

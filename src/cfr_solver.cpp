@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <stack>
 #include <vector>
+#include <future>
+#include <random>
 #include "cfr_solver.h"
 #include "node.h"
 #include "game.h"
@@ -108,16 +110,17 @@ vector<double> CFRSolver::GetAverageStrategy(const string &hash, const vector<bo
 namespace {
 
 // strength[hand][b0][b1] lookup table, built once (card ranks never change).
+// Magic-static init keeps the first concurrent callers thread-safe.
 int StrengthOf(int c, int b0, int b1) {
-    static vector<int> tab;
-    if (tab.empty()) {
-        tab.assign(NUM_CARDS * NUM_CARDS * NUM_CARDS, -1);
+    static const vector<int> tab = [] {
+        vector<int> t(NUM_CARDS * NUM_CARDS * NUM_CARDS, -1);
         for (int a = 0; a < NUM_CARDS; a++)
             for (int b = 0; b < NUM_CARDS; b++)
                 for (int d = 0; d < NUM_CARDS; d++)
                     if (a != b && a != d && b != d)
-                        tab[(a * NUM_CARDS + b) * NUM_CARDS + d] = Card::getStrength(Card(a), Card(b), Card(d));
-    }
+                        t[(a * NUM_CARDS + b) * NUM_CARDS + d] = Card::getStrength(Card(a), Card(b), Card(d));
+        return t;
+    }();
     return tab[(c * NUM_CARDS + b0) * NUM_CARDS + b1];
 }
 
@@ -226,10 +229,14 @@ vector<double> CFRSolver::BRWalk(Game &g, int br_player, const vector<double> &o
         // The opponent mixes into this action; the BR player's reach is fixed.
         vector<double> childReach = oppReach;
         if (actor != br_player) {
+            double total = 0;
             for (int opp = 0; opp < NUM_CARDS; opp++) {
                 if (childReach[opp] == 0) continue;
                 childReach[opp] *= strat[(opp / NUM_SUITS) * NUM_SUITS + FlushInfoFor(opp, b0, b1, stageBefore)][a];
+                total += childReach[opp];
             }
+            // The opponent never plays this line: exact-zero contribution.
+            if (total == 0) continue;
         }
 
         g.MakeMove(a);
@@ -238,13 +245,45 @@ vector<double> CFRSolver::BRWalk(Game &g, int br_player, const vector<double> &o
             BREvalTerminal(g, br_player, childReach, b0, b1, child);
         } else if (g.stage != stageBefore) {
             // Chance node: branch over the revealed card, removing it from play.
+            // brChanceSamples > 0 draws a weighted uniform subset (Monte Carlo).
+            vector<int> cands;
             for (int c = 0; c < NUM_CARDS; c++) {
-                if (c == b0 || c == b1) continue;
+                if (c != b0 && c != b1) cands.push_back(c);
+            }
+            double weight = 1.0;
+            if (brChanceSamples > 0 && (int)cands.size() > brChanceSamples) {
+                static thread_local mt19937 rng{random_device{}()};
+                // Partial Fisher-Yates: first k entries become the sample.
+                for (int i = 0; i < brChanceSamples; i++) {
+                    uniform_int_distribution<int> d(i, (int)cands.size() - 1);
+                    swap(cands[i], cands[d(rng)]);
+                }
+                weight = (double)cands.size() / brChanceSamples;
+                cands.resize(brChanceSamples);
+            }
+
+            // The flop fan-out runs in parallel; deeper levels stay sequential.
+            bool parallel = (stageBefore == PREFLOP);
+            vector<pair<int, future<vector<double>>>> futs;
+            for (int c : cands) {
                 vector<double> reachC = childReach;
                 reachC[c] = 0;
-                vector<double> sub = BRWalk(g, br_player, reachC, b0 < 0 ? c : b0, b0 < 0 ? b1 : c);
+                int nb0 = b0 < 0 ? c : b0, nb1 = b0 < 0 ? b1 : c;
+                if (parallel) {
+                    futs.push_back({c, async(launch::async, [this, g, reachC, br_player, nb0, nb1]() mutable {
+                        return BRWalk(g, br_player, reachC, nb0, nb1);
+                    })});
+                } else {
+                    vector<double> sub = BRWalk(g, br_player, reachC, nb0, nb1);
+                    for (int br = 0; br < NUM_CARDS; br++) {
+                        if (br != c) child[br] += weight * sub[br];
+                    }
+                }
+            }
+            for (auto &f : futs) {
+                vector<double> sub = f.second.get();
                 for (int br = 0; br < NUM_CARDS; br++) {
-                    if (br != c) child[br] += sub[br];
+                    if (br != f.first) child[br] += weight * sub[br];
                 }
             }
         } else {
@@ -275,7 +314,10 @@ double CFRSolver::ExactBestResponseValue(int br_player) {
     return total / ((double)NUM_CARDS * (NUM_CARDS - 1) * (NUM_CARDS - 2) * (NUM_CARDS - 3));
 }
 
-double CFRSolver::ComputeExploitability() {
+double CFRSolver::ComputeExploitability(int chanceSamples) {
     // Each term is that player's own best-response EV; the sum is 0 at equilibrium.
-    return (ExactBestResponseValue(0) + ExactBestResponseValue(1)) / 2.0;
+    brChanceSamples = chanceSamples;
+    double e = (ExactBestResponseValue(0) + ExactBestResponseValue(1)) / 2.0;
+    brChanceSamples = 0;
+    return e;
 }

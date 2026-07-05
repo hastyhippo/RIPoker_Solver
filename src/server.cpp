@@ -109,6 +109,11 @@ string BuildPositionJSON(CFRSolver &cfr, int stage, int board0Val, int board1Val
     int totalVisits = 0;
     for (auto &b : bestPerHand) if (b.found) totalVisits += b.visits;
 
+    // Step-by-step trail of the line so the frontend can draw the action tree.
+    bool trailOk = false;
+    vector<TrailStep> trail;
+    if (replayOk) trail = Game::BuildTrail(cfr.stack0, cfr.stack1, history, trailOk);
+
     ostringstream out;
     out << fixed << setprecision(4);
     out << "{\n  \"stage\": " << stage << ",\n  \"board\": [";
@@ -117,6 +122,38 @@ string BuildPositionJSON(CFRSolver &cfr, int stage, int board0Val, int board1Val
     if (stage >= TURN) WriteJSONString(out, RankName(board1Val)); else out << "null";
     out << "],\n  \"pot\": " << pot << ",\n  \"bet\": " << bet << ",\n  \"history\": ";
     WriteJSONString(out, history);
+
+    out << ",\n  \"trail\": ";
+    if (!trailOk) {
+        out << "null";
+    } else {
+        out << "[\n";
+        for (size_t t = 0; t < trail.size(); t++) {
+            const TrailStep &s = trail[t];
+            out << "    ";
+            if (s.isReveal) {
+                out << "{\"type\": \"card\", \"card\": ";
+                WriteJSONString(out, RankName(s.revealSlot == 0 ? board0Val : board1Val));
+                out << "}";
+            } else {
+                out << "{\"type\": \"decision\", \"player\": " << s.player << ", \"chosen\": ";
+                if (s.chosen < 0) out << "null";
+                else WriteJSONString(out, move_names[s.chosen]);
+                out << ", \"actions\": [";
+                for (size_t j = 0; j < s.legal.size(); j++) {
+                    out << "{\"action\": ";
+                    WriteJSONString(out, move_names[s.legal[j]]);
+                    if (s.chipSize[j] >= 0) out << ", \"size\": " << s.chipSize[j];
+                    out << "}";
+                    if (j + 1 < s.legal.size()) out << ", ";
+                }
+                out << "]}";
+            }
+            out << (t + 1 < trail.size() ? ",\n" : "\n");
+        }
+        out << "  ]";
+    }
+
     out << ",\n  \"visits\": " << totalVisits
         << ",\n  \"hands\": [\n";
 
@@ -169,9 +206,11 @@ void Start(CFRSolver &cfr, int port) {
     // lock-free (atomic only) so it can interrupt a train holding the lock.
     mutex solverMutex;
 
-    // One exact exploitability sample per EXPLOIT_EVERY trained hands (plus an
+    // One exploitability sample per EXPLOIT_EVERY trained hands (plus an
     // iteration-0 baseline), for the frontend's graph. Guarded by solverMutex.
+    // Monte Carlo over board reveals: EXPLOIT_MC_CHANCE cards per reveal.
     const long long EXPLOIT_EVERY = 1000;
+    const int EXPLOIT_MC_CHANCE = 4; // for each exploitabtility sample, take 4 candidates for the next card only
     vector<pair<long long, double>> exploitHistory;
 
     // Static action config (order + labels) fetched once by the frontend.
@@ -200,7 +239,7 @@ void Start(CFRSolver &cfr, int port) {
         lock_guard<mutex> lock(solverMutex);
         cfr.Reset(s0, s1);
         exploitHistory.clear();
-        exploitHistory.push_back({0, cfr.ComputeExploitability()}); // uniform baseline
+        exploitHistory.push_back({0, cfr.ComputeExploitability(EXPLOIT_MC_CHANCE)}); // uniform baseline
         res.set_content("{\"ok\": true}", "application/json");
     });
 
@@ -209,14 +248,14 @@ void Start(CFRSolver &cfr, int port) {
         lock_guard<mutex> lock(solverMutex);
         cancelRequested = false;
         // Baseline for servers that go straight to training without a configure.
-        if (exploitHistory.empty()) exploitHistory.push_back({0, cfr.ComputeExploitability()});
+        if (exploitHistory.empty()) exploitHistory.push_back({0, cfr.ComputeExploitability(EXPLOIT_MC_CHANCE)});
         int trained = 0;
         for (int i = 0; i < iters; i++) {
             if (cancelRequested) break; // checked every single iteration for near-instant response
             cfr.TrainCFR();
             trained++;
             if (cfr.iteration % EXPLOIT_EVERY == 0) {
-                exploitHistory.push_back({cfr.iteration, cfr.ComputeExploitability()});
+                exploitHistory.push_back({cfr.iteration, cfr.ComputeExploitability(EXPLOIT_MC_CHANCE)});
             }
         }
         ostringstream out;
@@ -273,7 +312,7 @@ void Start(CFRSolver &cfr, int port) {
     });
 
     // Pre-listen, so the page shows the uniform baseline on first load.
-    exploitHistory.push_back({0, cfr.ComputeExploitability()});
+    exploitHistory.push_back({0, cfr.ComputeExploitability(EXPLOIT_MC_CHANCE)});
 
     cout << "Serving on http://localhost:" << port << "/ (Ctrl-C to stop)\n";
     svr.listen("0.0.0.0", port);
