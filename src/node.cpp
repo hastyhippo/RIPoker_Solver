@@ -27,55 +27,17 @@ Node::Node(const vector<bool> &actions) {
     possible_actions = actions;
 }
 
-string Node::GetBetAction(int pot, int bet_size, bool useBuckets) {
+string Node::GetBetAction(int bet_size) {
     if (bet_size == 0) {
         //Check call
         return "0";
     }
-    if (!useBuckets) {
-        return "[" + to_string(bet_size) + "]";
-    }
-    double ratio = (double)bet_size / pot;
-    if (ratio < BET_1_MAX) {
-        return "1";
-    } else if (ratio < BET_2_MAX) {
-        return "2";
-    } else if (ratio < BET_3_MAX) {
-        return "3";
-    }else if (ratio < BET_4_MAX) {
-        return "4";
-    } else if (ratio < BET_5_MAX) {
-        return "5";
-    } else if (ratio < BET_6_MAX) {
-        return "6";
-    } else if (ratio < BET_7_MAX) {
-        return "7";
-    } else if (ratio < BET_8_MAX) {
-        return "8";
-    } else {
-        return "9";
-    }
+    return "[" + to_string(bet_size) + "]";
 }
 
 // RAISES ONLY
-string Node::GetRaiseAction(int bet_size, int last_bet_size, bool useBuckets) {
-    if (!useBuckets) {
-        return "{" + to_string(bet_size) + "}";
-    }
-    double ratio = (double)bet_size / last_bet_size;
-    if (ratio < RAISE_A_MAX) {
-        return "A";
-    } else if (ratio < RAISE_B_MAX) {
-        return "B";
-    } else if (ratio < RAISE_C_MAX) {
-        return "C";
-    } else if (ratio < RAISE_D_MAX) {
-        return "D";
-    } else if (ratio < RAISE_E_MAX) {
-        return "E";
-    } else {
-        return "F";
-    }
+string Node::GetRaiseAction(int bet_size) {
+    return "{" + to_string(bet_size) + "}";
 }
 
 uint32_t Node::BuildHash(int handVal, int board0Val, int board1Val, int flushInfo, int stage) {

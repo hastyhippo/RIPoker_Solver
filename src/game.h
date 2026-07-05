@@ -15,34 +15,38 @@ extern vector<double> bet_sizings;
 extern vector<double> raise_sizings;
 extern vector<string> move_names;
 
+// One moveHistory entry, exactly what UnmakeMove needs. Chips covers
+// check/call/bet/raise/all-in; StreetClose marks the pot bump + stage++.
+struct Move {
+    enum Kind : uint8_t { Chips, Fold, StreetClose };
+    Kind kind;
+    int8_t player; // acting player (meaningless for StreetClose)
+    int amount;    // chips added to bet_states this move (0 for check/fold)
+};
+
 class Game {
     private:
 
     public:
-        
+
         int first_to_act;
         int player; // 0 or 1
         int stage;
         bool terminal;
 
         vector<int> effective_stack;
-        vector<int> chips;
         vector<vector<int>> bet_states;
 
         int pot;
         Deck deck;
         vector<Card> hands;
         vector<Card> board;
-        vector<string> moveHistory;
+        vector<Move> moveHistory;
 
-        string history;
         string abstractHistory;
 
-        // Exact chip amounts vs percentage-of-pot buckets in the history.
-        bool useBetSizeBuckets;
-
         //Built
-        Game(int stack0, int stack1, bool useBetSizeBuckets);
+        Game(int stack0, int stack1);
         void InitialiseGame(int OOP);
         string PrintGame(bool print);
         vector<bool> GetActions(bool print);

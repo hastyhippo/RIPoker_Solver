@@ -9,27 +9,16 @@
 #include "game.h"
 #include "defines.h"
 
-CFRSolver::CFRSolver() {
-
-}
-
-CFRSolver::~CFRSolver() {
-    for (auto &entry : positionMap) delete entry.second;
-}
-
-void CFRSolver::Reset(int newStack0, int newStack1, bool newUseBetSizeBuckets) {
-    for (auto &entry : positionMap) delete entry.second;
+void CFRSolver::Reset(int newStack0, int newStack1) {
     positionMap.clear();
-    positionCount.clear();
     iteration = 0;
     stack0 = newStack0;
     stack1 = newStack1;
-    useBetSizeBuckets = newUseBetSizeBuckets;
 }
 
 void CFRSolver::TrainCFR() {
     iteration++;
-    Game g(stack0, stack1, useBetSizeBuckets);
+    Game g(stack0, stack1);
     g.InitialiseGame(0);
     CFR(g, 1, 1);
 }
@@ -37,13 +26,11 @@ void CFRSolver::TrainCFR() {
 Node *CFRSolver::GetNode(const string &hash, const vector<bool> &possible_actions) {
     auto it = positionMap.find(hash);
     if (it == positionMap.end()) {
-        Node *new_node = new Node(possible_actions);
-        positionMap.emplace(hash, new_node);
-        return new_node;
+        it = positionMap.emplace(hash, Node(possible_actions)).first;
     }
     // The stored legality mask may not match a later visit's real
     // possible_actions; that's fine - live math always takes the current mask.
-    return it->second;
+    return &it->second;
 }
 
 // 2p only. Fixed player-0-perspective utilities (p1/p2 are the players' reach
@@ -59,7 +46,7 @@ double CFRSolver::CFR(Game &g, double p1, double p2) {
     vector<bool> possible_actions = g.GetActions(false);
     string hash = Node::GetHash(g);
     Node *currentNode = GetNode(hash, possible_actions);
-    positionCount[hash]++;
+    currentNode->visits++;
 
     currentNode->UpdateStrategy(possible_actions);
     vector<double> strategy = currentNode->strategy;
@@ -115,55 +102,176 @@ vector<double> CFRSolver::GetAverageStrategy(const string &hash, const vector<bo
         for (int i = 0; i < NUM_ACTIONS; i++) if (possible_actions[i]) uniform[i] = 1.0 / (double)n;
         return uniform;
     }
-    return it->second->GetFinalStrategy(possible_actions);
+    return it->second.GetFinalStrategy(possible_actions);
 }
 
-// Player-0-perspective value (same convention as CFR) with br_player playing
-// a best response and the opponent playing its trained average strategy.
-double CFRSolver::BestResponseValue(Game &g, int br_player) {
-    if (g.terminal) return g.GetUtilityForPlayer0();
+namespace {
 
-    vector<bool> possible_actions = g.GetActions(false);
+// strength[hand][b0][b1] lookup table, built once (card ranks never change).
+int StrengthOf(int c, int b0, int b1) {
+    static vector<int> tab;
+    if (tab.empty()) {
+        tab.assign(NUM_CARDS * NUM_CARDS * NUM_CARDS, -1);
+        for (int a = 0; a < NUM_CARDS; a++)
+            for (int b = 0; b < NUM_CARDS; b++)
+                for (int d = 0; d < NUM_CARDS; d++)
+                    if (a != b && a != d && b != d)
+                        tab[(a * NUM_CARDS + b) * NUM_CARDS + d] = Card::getStrength(Card(a), Card(b), Card(d));
+    }
+    return tab[(c * NUM_CARDS + b0) * NUM_CARDS + b1];
+}
 
-    if (g.player == br_player) {
-        // Maximise br_player's own utility, but return the line's player-0 value.
-        double perspective = (br_player == 0) ? 1.0 : -1.0;
-        double bestOwn = -1e18, bestP0 = 0.0;
-        for (int i = 0; i < NUM_ACTIONS; i++) {
-            if (!possible_actions[i]) continue;
-            g.MakeMove(i);
-            double childP0 = BestResponseValue(g, br_player);
-            g.UnmakeMove();
-            double own = perspective * childP0;
-            if (own > bestOwn) { bestOwn = own; bestP0 = childP0; }
+// Node::GetHash's flushInfo, recomputed from raw card indices.
+int FlushInfoFor(int card, int b0, int b1, int stage) {
+    if (stage == FLOP) return (card % 4 == b0 % 4) ? 1 : 0;
+    if (stage == TURN) {
+        bool handSuited = (card % 4 == b0 % 4), boardSuited = (b0 % 4 == b1 % 4);
+        if (handSuited && !boardSuited) return 1;
+        if (handSuited && boardSuited) return 2;
+        if (!handSuited && boardSuited) return 3;
+    }
+    return 0;
+}
+
+} // namespace
+
+// Terminal payoff accumulation: V[brCard] += sum over consistent opponent
+// cards (and any undealt board runouts) of reach * br_player's utility.
+void CFRSolver::BREvalTerminal(Game &g, int br_player, const vector<double> &oppReach, int b0, int b1, vector<double> &V) {
+    int stage = g.stage;
+    int revealed = (b0 >= 0) + (b1 >= 0);
+
+    // Fold/uncalled ending: utility is card-independent (same math as GetUtility).
+    if (stage != 3 && g.bet_states[stage][0] != g.bet_states[stage][1]) {
+        int winner = g.bet_states[stage][0] > g.bet_states[stage][1] ? 0 : 1;
+        double profit = (double)(g.pot / 2 + g.bet_states[stage][1 - winner]);
+        double uBr = (winner == br_player) ? profit : -profit;
+        // Undealt board slots multiply the count of consistent full deals.
+        double mult = (revealed == 0) ? 22.0 * 21.0 : (revealed == 1 ? 21.0 : 1.0);
+        for (int br = 0; br < NUM_CARDS; br++) {
+            if (br == b0 || br == b1) continue;
+            double sum = 0;
+            for (int opp = 0; opp < NUM_CARDS; opp++) {
+                if (opp != br) sum += oppReach[opp]; // board cards already zeroed
+            }
+            V[br] += mult * sum * uBr;
         }
-        return bestP0;
-    } else {
-        string hash = Node::GetHash(g);
-        vector<double> strat = GetAverageStrategy(hash, possible_actions);
-        double node_value = 0;
-        for (int i = 0; i < NUM_ACTIONS; i++) {
-            if (!possible_actions[i]) continue;
-            g.MakeMove(i);
-            node_value += strat[i] * BestResponseValue(g, br_player);
-            g.UnmakeMove();
+        return;
+    }
+
+    // Showdown: enumerate any undealt board cards (all-in before the reveal).
+    double half = (double)(g.pot / 2);
+    for (int br = 0; br < NUM_CARDS; br++) {
+        if (br == b0 || br == b1) continue;
+        double acc = 0;
+        for (int opp = 0; opp < NUM_CARDS; opp++) {
+            if (opp == br || oppReach[opp] == 0) continue;
+            double u = 0;
+            if (revealed == 2) {
+                int sb = StrengthOf(br, b0, b1), so = StrengthOf(opp, b0, b1);
+                u = (sb == so) ? 0 : (sb < so ? half : -half);
+            } else if (revealed == 1) {
+                for (int c1 = 0; c1 < NUM_CARDS; c1++) {
+                    if (c1 == br || c1 == opp || c1 == b0) continue;
+                    int sb = StrengthOf(br, b0, c1), so = StrengthOf(opp, b0, c1);
+                    u += (sb == so) ? 0 : (sb < so ? half : -half);
+                }
+            } else {
+                for (int c0 = 0; c0 < NUM_CARDS; c0++) {
+                    if (c0 == br || c0 == opp) continue;
+                    for (int c1 = 0; c1 < NUM_CARDS; c1++) {
+                        if (c1 == br || c1 == opp || c1 == c0) continue;
+                        int sb = StrengthOf(br, c0, c1), so = StrengthOf(opp, c0, c1);
+                        u += (sb == so) ? 0 : (sb < so ? half : -half);
+                    }
+                }
+            }
+            acc += oppReach[opp] * u;
         }
-        return node_value;
+        V[br] += acc;
     }
 }
 
-double CFRSolver::EstimateExploitability(int num_samples) {
-    double br0_total = 0, br1_total = 0;
-    for (int s = 0; s < num_samples; s++) {
-        Game g0(stack0, stack1, useBetSizeBuckets);
-        g0.InitialiseGame(0);
-        br0_total += BestResponseValue(g0, 0);
+// Public-tree walk. br_player sees only its card + public state (chance is
+// branched at the reveal, so it is NOT clairvoyant about runout or opponent).
+vector<double> CFRSolver::BRWalk(Game &g, int br_player, const vector<double> &oppReach, int b0, int b1) {
+    vector<double> V(NUM_CARDS, 0.0);
+    vector<bool> acts = g.GetActions(false);
+    int actor = g.player;
+    int stageBefore = g.stage;
 
-        Game g1(stack0, stack1, useBetSizeBuckets);
-        g1.InitialiseGame(0);
-        // BestResponseValue returns player-0 utility; player 1's own
-        // best-response value is its negation.
-        br1_total += -BestResponseValue(g1, 1);
+    // Opponent node: average strategy per infoset, deduped by (value, flushInfo).
+    vector<vector<double>> strat;
+    if (actor != br_player) {
+        strat.assign(NUM_CARDS, {});
+        for (int opp = 0; opp < NUM_CARDS; opp++) {
+            if (oppReach[opp] == 0 || opp == b0 || opp == b1) continue;
+            int fi = FlushInfoFor(opp, b0, b1, stageBefore);
+            int slot = (opp / 4) * 4 + fi;
+            if (!strat[slot].empty()) continue;
+            string key = Node::BuildKey(opp / 4, b0 >= 0 ? b0 / 4 : 0, b1 >= 0 ? b1 / 4 : 0,
+                                        fi, stageBefore, g.KeyPot(), g.KeyBet(), g.abstractHistory);
+            strat[slot] = GetAverageStrategy(key, acts);
+        }
     }
-    return (br0_total + br1_total) / (2.0 * num_samples);
+
+    bool firstAction = true;
+    for (int a = 0; a < NUM_ACTIONS; a++) {
+        if (!acts[a]) continue;
+
+        // The opponent mixes into this action; the BR player's reach is fixed.
+        vector<double> childReach = oppReach;
+        if (actor != br_player) {
+            for (int opp = 0; opp < NUM_CARDS; opp++) {
+                if (childReach[opp] == 0) continue;
+                childReach[opp] *= strat[(opp / 4) * 4 + FlushInfoFor(opp, b0, b1, stageBefore)][a];
+            }
+        }
+
+        g.MakeMove(a);
+        vector<double> child(NUM_CARDS, 0.0);
+        if (g.terminal) {
+            BREvalTerminal(g, br_player, childReach, b0, b1, child);
+        } else if (g.stage != stageBefore) {
+            // Chance node: branch over the revealed card, removing it from play.
+            for (int c = 0; c < NUM_CARDS; c++) {
+                if (c == b0 || c == b1) continue;
+                vector<double> reachC = childReach;
+                reachC[c] = 0;
+                vector<double> sub = BRWalk(g, br_player, reachC, b0 < 0 ? c : b0, b0 < 0 ? b1 : c);
+                for (int br = 0; br < NUM_CARDS; br++) {
+                    if (br != c) child[br] += sub[br];
+                }
+            }
+        } else {
+            child = BRWalk(g, br_player, childReach, b0, b1);
+        }
+        g.UnmakeMove();
+
+        if (actor == br_player) {
+            // Max per own card: each brCard is its own infoset here.
+            if (firstAction) V = child;
+            else for (int br = 0; br < NUM_CARDS; br++) V[br] = max(V[br], child[br]);
+        } else {
+            for (int br = 0; br < NUM_CARDS; br++) V[br] += child[br];
+        }
+        firstAction = false;
+    }
+    return V;
+}
+
+double CFRSolver::ExactBestResponseValue(int br_player) {
+    Game g(stack0, stack1);
+    g.InitialiseGame(0); // dealt cards are dummies; only money state is used
+    vector<double> oppReach(NUM_CARDS, 1.0);
+    vector<double> V = BRWalk(g, br_player, oppReach, -1, -1);
+    double total = 0;
+    for (double v : V) total += v;
+    // Normalize by the count of ordered deals (br, opp, board0, board1).
+    return total / ((double)NUM_CARDS * (NUM_CARDS - 1) * (NUM_CARDS - 2) * (NUM_CARDS - 3));
+}
+
+double CFRSolver::ComputeExploitability() {
+    // Each term is that player's own best-response EV; the sum is 0 at equilibrium.
+    return (ExactBestResponseValue(0) + ExactBestResponseValue(1)) / 2.0;
 }

@@ -11,18 +11,22 @@
 
 using namespace std;
 
+namespace {
+// Seeded once per thread; the old per-shuffle random_device+mt19937
+// construction was a large fixed cost on every hand in the CFR loop.
+mt19937 &Rng() {
+    static thread_local mt19937 rng{random_device{}()};
+    return rng;
+}
+}
+
 Deck::Deck() {
-    vector<Card> v(NUM_CARDS);
+    cards.resize(NUM_CARDS);
     for (int i = 0; i < NUM_CARDS; i++) {
-        v[i] = Card(i);
+        cards[i] = Card(i);
     }
-
-    random_device rd;
-    mt19937 g(rd());
-    shuffle(v.begin(), v.end(), g);
+    // No shuffle here: every consumer calls InitialiseGame -> Shuffle() first.
     it = 0;
-
-    this->cards = v;
 }
 
 Card Deck::Draw() {
@@ -34,10 +38,8 @@ Card Deck::Draw() {
 }
 
 void Deck::Shuffle() {
-    random_device rd;
-    mt19937 g(rd());
-    shuffle(cards.begin(), cards.end(), g);
-
+    shuffle(cards.begin(), cards.end(), Rng());
+    it = 0; // a shuffle restarts the deck
 }
 
 void Deck::PrintDeck() {

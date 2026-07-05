@@ -21,10 +21,6 @@
         <label class="field">Effective stack
           <input type="number" id="stack" value="10" min="1">
         </label>
-        <label class="field-checkbox">
-          <input type="checkbox" id="useBetSizeBuckets">
-          Bet-size buckets
-        </label>
         <button class="primary" id="saveStacksBtn" title="Saving wipes all trained data">Save</button>
         <div class="status" id="stacksStatus"></div>
       </div>
@@ -69,6 +65,12 @@
   <section class="strategy-panel" id="resultsPanel">
     <div class="panel-title">Strategy</div>
     <div id="results">Loading…</div>
+  </section>
+
+  <!-- Exploitability convergence: one point per 1,000 trained hands -->
+  <section class="exploit-panel">
+    <div class="panel-title">Exploitability <span class="panel-sub">chips/hand, sampled every 1,000 hands</span></div>
+    <div id="exploitChart" class="exploit-chart"></div>
   </section>
 </div>
 

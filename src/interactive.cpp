@@ -51,7 +51,7 @@ void PlayVsSolver(CFRSolver &cfr, int humanPlayer) {
     mt19937 rng(rd());
 
     while (true) {
-        Game g(STARTING_STACK, STARTING_STACK, false);
+        Game g(STARTING_STACK, STARTING_STACK);
         g.InitialiseGame(0);
         Display::PrintBoard(g, humanPlayer);
 

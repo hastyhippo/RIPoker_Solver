@@ -30,6 +30,7 @@ class Node {
         vector<double> strategy_sum;
         vector<double> regret_sum;
         vector<bool> possible_actions;
+        int visits = 0; // times the trainer hit this infoset
 
         Node(const vector<bool> &actions);
 
@@ -39,10 +40,10 @@ class Node {
         void UpdateRegret(const vector<double> &new_regret, const vector<bool> &possible_actions, double opp_reach, double own_reach, long long iteration);
         vector<double> GetFinalStrategy(const vector<bool> &possible_actions);
 
-    // History token for a bet/raise: bucketed letter (useBuckets), else exact
-    // "[N]"/"{N}". Check (bet_size==0) always returns "0".
-    static string GetBetAction(int pot, int bet_size, bool useBuckets);
-    static string GetRaiseAction(int bet_size, int last_bet_size, bool useBuckets);
+    // History token for a bet/raise: the exact chip amount "[N]"/"{N}".
+    // Check (bet_size==0) always returns "0".
+    static string GetBetAction(int bet_size);
+    static string GetRaiseAction(int bet_size);
     static string GetHash(Game &g);
     static ParsedHash ParseHash(const string& full_hash);
 

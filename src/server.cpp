@@ -7,6 +7,7 @@
 #include <string>
 #include <cctype>
 #include <atomic>
+#include <mutex>
 #include <unordered_map>
 
 #include "server.h"
@@ -60,20 +61,6 @@ int ExtractJSONInt(const string &body, const string &key, int def) {
     return stoi(body.substr(start, pos - start));
 }
 
-// Bare true/false extractor for flat request bodies.
-bool ExtractJSONBool(const string &body, const string &key, bool def) {
-    string needle = "\"" + key + "\"";
-    size_t pos = body.find(needle);
-    if (pos == string::npos) return def;
-    pos = body.find(':', pos + needle.size());
-    if (pos == string::npos) return def;
-    pos++;
-    while (pos < body.size() && isspace((unsigned char)body[pos])) pos++;
-    if (body.compare(pos, 4, "true") == 0) return true;
-    if (body.compare(pos, 5, "false") == 0) return false;
-    return def;
-}
-
 struct BestMatch {
     bool found = false;
     int visits = 0;
@@ -112,9 +99,8 @@ string BuildPositionJSON(CFRSolver &cfr, int stage, int board0Val, int board1Val
                 string key = Node::BuildKey(handVal, board0Val, board1Val, flushInfo, stage, pot, bet, history);
                 auto it = cfr.positionMap.find(key);
                 if (it == cfr.positionMap.end()) continue;
-                int visits = cfr.positionCount[key];
-                if (visits > bestPerHand[handVal].visits) {
-                    bestPerHand[handVal] = {true, visits, it->second};
+                if (it->second.visits > bestPerHand[handVal].visits) {
+                    bestPerHand[handVal] = {true, it->second.visits, &it->second};
                 }
             }
         }
@@ -132,7 +118,6 @@ string BuildPositionJSON(CFRSolver &cfr, int stage, int board0Val, int board1Val
     out << "],\n  \"pot\": " << pot << ",\n  \"bet\": " << bet << ",\n  \"history\": ";
     WriteJSONString(out, history);
     out << ",\n  \"visits\": " << totalVisits
-        << ",\n  \"useBetSizeBuckets\": " << (cfr.useBetSizeBuckets ? "true" : "false")
         << ",\n  \"hands\": [\n";
 
     for (int handVal = 0; handVal < numHandValues; handVal++) {
@@ -180,6 +165,15 @@ void Start(CFRSolver &cfr, int port) {
     // Shared with /api/train/cancel on another thread; atomic avoids a mutex.
     atomic<bool> cancelRequested{false};
 
+    // Serializes all solver access across httplib's thread pool. Cancel stays
+    // lock-free (atomic only) so it can interrupt a train holding the lock.
+    mutex solverMutex;
+
+    // One exact exploitability sample per EXPLOIT_EVERY trained hands (plus an
+    // iteration-0 baseline), for the frontend's graph. Guarded by solverMutex.
+    const long long EXPLOIT_EVERY = 1000;
+    vector<pair<long long, double>> exploitHistory;
+
     // Static action config (order + labels) fetched once by the frontend.
     svr.Get("/api/actions", [&](const httplib::Request &, httplib::Response &res) {
         ostringstream out;
@@ -203,19 +197,27 @@ void Start(CFRSolver &cfr, int port) {
     svr.Post("/api/configure", [&](const httplib::Request &req, httplib::Response &res) {
         int s0 = ExtractJSONInt(req.body, "stack0", STARTING_STACK);
         int s1 = ExtractJSONInt(req.body, "stack1", STARTING_STACK);
-        bool useBetSizeBuckets = ExtractJSONBool(req.body, "useBetSizeBuckets", false);
-        cfr.Reset(s0, s1, useBetSizeBuckets);
+        lock_guard<mutex> lock(solverMutex);
+        cfr.Reset(s0, s1);
+        exploitHistory.clear();
+        exploitHistory.push_back({0, cfr.ComputeExploitability()}); // uniform baseline
         res.set_content("{\"ok\": true}", "application/json");
     });
 
     svr.Post("/api/train", [&](const httplib::Request &req, httplib::Response &res) {
         int iters = ExtractJSONInt(req.body, "iterations", 0);
+        lock_guard<mutex> lock(solverMutex);
         cancelRequested = false;
+        // Baseline for servers that go straight to training without a configure.
+        if (exploitHistory.empty()) exploitHistory.push_back({0, cfr.ComputeExploitability()});
         int trained = 0;
         for (int i = 0; i < iters; i++) {
             if (cancelRequested) break; // checked every single iteration for near-instant response
             cfr.TrainCFR();
             trained++;
+            if (cfr.iteration % EXPLOIT_EVERY == 0) {
+                exploitHistory.push_back({cfr.iteration, cfr.ComputeExploitability()});
+            }
         }
         ostringstream out;
         out << "{\"iteration\": " << cfr.iteration << ", \"infosets\": " << cfr.positionMap.size()
@@ -228,6 +230,18 @@ void Start(CFRSolver &cfr, int port) {
         res.set_content("{\"ok\": true}", "application/json");
     });
 
+    svr.Get("/api/exploitability", [&](const httplib::Request &, httplib::Response &res) {
+        lock_guard<mutex> lock(solverMutex);
+        ostringstream out;
+        out << fixed << setprecision(6) << "{\"points\": [";
+        for (size_t i = 0; i < exploitHistory.size(); i++) {
+            out << "{\"iter\": " << exploitHistory[i].first << ", \"value\": " << exploitHistory[i].second << "}";
+            if (i + 1 < exploitHistory.size()) out << ", ";
+        }
+        out << "]}";
+        res.set_content(out.str(), "application/json");
+    });
+
     svr.Get("/api/position", [&](const httplib::Request &req, httplib::Response &res) {
         string history = req.get_param_value("history");
         int stage = (int)count(history.begin(), history.end(), ',');
@@ -235,10 +249,12 @@ void Start(CFRSolver &cfr, int port) {
         int board0Val = 0, board1Val = 0;
         if (stage >= FLOP) board0Val = RankValue(req.get_param_value("board0"));
         if (stage >= TURN) board1Val = RankValue(req.get_param_value("board1"));
+        lock_guard<mutex> lock(solverMutex);
         res.set_content(BuildPositionJSON(cfr, stage, board0Val, board1Val, history), "application/json");
     });
 
     svr.Get("/api/random-position", [&](const httplib::Request &, httplib::Response &res) {
+        lock_guard<mutex> lock(solverMutex);
         if (cfr.positionMap.empty()) {
             res.set_content(BuildPositionJSON(cfr, PREFLOP, 0, 0, ""), "application/json");
             return;
@@ -255,6 +271,9 @@ void Start(CFRSolver &cfr, int port) {
         ParsedHash p = Node::ParseHash(chosenKey);
         res.set_content(BuildPositionJSON(cfr, p.stage, p.board0Val, p.board1Val, p.abstractHistory), "application/json");
     });
+
+    // Pre-listen, so the page shows the uniform baseline on first load.
+    exploitHistory.push_back({0, cfr.ComputeExploitability()});
 
     cout << "Serving on http://localhost:" << port << "/ (Ctrl-C to stop)\n";
     svr.listen("0.0.0.0", port);

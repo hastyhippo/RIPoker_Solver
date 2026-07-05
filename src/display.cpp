@@ -77,43 +77,14 @@ namespace {
         return s;
     }
 
-    // Pot-fraction as a whole-number percent (0.5 -> "50").
-    string Pct(double frac) {
-        ostringstream ss;
-        ss << (int)round(frac * 100);
-        return ss.str();
-    }
-
-    string Mult(double m) {
-        ostringstream ss;
-        ss << fixed << setprecision(1) << m;
-        string s = ss.str();
-        if (s.size() >= 2 && s[s.size() - 1] == '0' && s[s.size() - 2] == '.') s.resize(s.size() - 2);
-        return s;
-    }
-
-    // One bucketed abstractHistory character -> human-readable action.
+    // One fixed abstractHistory character -> human-readable action. Bet/raise
+    // tokens are exact "[N]"/"{N}" and handled directly in DecodeAbstractHistory.
     string ActionLetterName(char c) {
         switch (c) {
             case '0': return "Check";
             case 'c': return "Call";
             case 'f': return "Fold";
             case 'a': return "All-in";
-            case '1': return "Bet <" + Pct(BET_1_MAX) + "%pot";
-            case '2': return "Bet " + Pct(BET_1_MAX) + "-" + Pct(BET_2_MAX) + "%pot";
-            case '3': return "Bet " + Pct(BET_2_MAX) + "-" + Pct(BET_3_MAX) + "%pot";
-            case '4': return "Bet " + Pct(BET_3_MAX) + "-" + Pct(BET_4_MAX) + "%pot";
-            case '5': return "Bet " + Pct(BET_4_MAX) + "-" + Pct(BET_5_MAX) + "%pot";
-            case '6': return "Bet " + Pct(BET_5_MAX) + "-" + Pct(BET_6_MAX) + "%pot";
-            case '7': return "Bet " + Pct(BET_6_MAX) + "-" + Pct(BET_7_MAX) + "%pot";
-            case '8': return "Bet " + Pct(BET_7_MAX) + "-" + Pct(BET_8_MAX) + "%pot";
-            case '9': return "Bet " + Pct(BET_8_MAX) + "%+pot";
-            case 'A': return "Raise <" + Mult(RAISE_A_MAX) + "x";
-            case 'B': return "Raise " + Mult(RAISE_A_MAX) + "-" + Mult(RAISE_B_MAX) + "x";
-            case 'C': return "Raise " + Mult(RAISE_B_MAX) + "-" + Mult(RAISE_C_MAX) + "x";
-            case 'D': return "Raise " + Mult(RAISE_C_MAX) + "-" + Mult(RAISE_D_MAX) + "x";
-            case 'E': return "Raise " + Mult(RAISE_D_MAX) + "-" + Mult(RAISE_E_MAX) + "x";
-            case 'F': return "Raise " + Mult(RAISE_E_MAX) + "x+";
         }
         return string(1, c);
     }
@@ -177,9 +148,11 @@ void PrintFinalStrategyReport(CFRSolver &cfr, int topN) {
          << DIM << "  (top " << topN << " most-visited nodes, of " << cfr.positionMap.size() << " total)" << RESET << "\n";
     cout << BOLD << YELLOW << Line() << RESET << "\n";
 
-    vector<pair<string, Node*>> rows(cfr.positionMap.begin(), cfr.positionMap.end());
-    sort(rows.begin(), rows.end(), [&](const pair<string, Node*> &a, const pair<string, Node*> &b) {
-        return cfr.positionCount[a.first] > cfr.positionCount[b.first];
+    vector<pair<string, Node*>> rows;
+    rows.reserve(cfr.positionMap.size());
+    for (auto &kv : cfr.positionMap) rows.push_back({kv.first, &kv.second});
+    sort(rows.begin(), rows.end(), [](const pair<string, Node*> &a, const pair<string, Node*> &b) {
+        return a.second->visits > b.second->visits;
     });
     if ((int)rows.size() > topN) rows.resize(topN);
 
@@ -194,7 +167,7 @@ void PrintFinalStrategyReport(CFRSolver &cfr, int topN) {
         cout << DIM << "  [Stage: " << StageName(p.stage) << ", Flush: " << FlushInfoName(p.flushInfo)
              << ", Pot: " << p.pot << ", To call: " << p.bet << "]" << RESET << "\n";
         cout << DIM << "Raw history code: " << (p.abstractHistory.empty() ? "(none)" : p.abstractHistory)
-             << "  |  visits: " << cfr.positionCount[hash] << RESET << "\n";
+             << "  |  visits: " << node->visits << RESET << "\n";
         cout << DIM << "Action sequence: " << RESET << DecodeAbstractHistory(p.abstractHistory) << "\n";
 
         vector<double> strat = node->GetFinalStrategy(node->possible_actions);
@@ -229,8 +202,8 @@ void PrintPreflopStrategy(CFRSolver &cfr) {
         ParsedHash p = Node::ParseHash(entry.first);
         if (p.stage != PREFLOP || !p.abstractHistory.empty()) continue;
         if (p.handVal < 0 || p.handVal >= numHandValues) continue;
-        if (!best[p.handVal].second || cfr.positionCount[entry.first] > cfr.positionCount[best[p.handVal].first]) {
-            best[p.handVal] = entry;
+        if (!best[p.handVal].second || entry.second.visits > best[p.handVal].second->visits) {
+            best[p.handVal] = {entry.first, &entry.second};
         }
     }
 
@@ -242,7 +215,7 @@ void PrintPreflopStrategy(CFRSolver &cfr) {
 
         cout << "\n" << BOLD << CYAN << "Hand: " << RESET << RankName(handVal)
              << DIM << "  [Stage: " << StageName(p.stage) << ", Pot: " << p.pot << ", To call: " << p.bet << "]"
-             << "  |  visits: " << cfr.positionCount[hash] << RESET << "\n";
+             << "  |  visits: " << node->visits << RESET << "\n";
         cout << DIM << "Action sequence: " << RESET << DecodeAbstractHistory(p.abstractHistory) << "\n";
 
         vector<double> strat = node->GetFinalStrategy(node->possible_actions);

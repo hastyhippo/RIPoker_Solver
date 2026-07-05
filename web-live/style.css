@@ -92,6 +92,7 @@ body {
   gap: 8px;
   padding-right: 14px;
   border-right: 1px solid var(--border);
+  flex: 0 0 auto;
 }
 .brand h1 { font-size: 18px; margin: 0; white-space: nowrap; }
 .brand-sub {
@@ -107,10 +108,14 @@ body {
   gap: 4px;
   padding-right: 14px;
   border-right: 1px solid var(--border);
+  /* Brand stays content-width; the two groups split the rest of the banner.
+     Change these flex-grow values to reweight (e.g. config 3 / training 2). */
+  flex: 1 1 0;
+  min-width: 0;
 }
+.config-group   { flex-grow: 1; }
+.training-group { flex-grow: 1; }
 .banner-group:last-child { border-right: none; padding-right: 0; }
-/* Training sits at the far right of the banner */
-.training-group { margin-left: auto; }
 
 .group-label {
   font-size: 11px;
@@ -168,6 +173,41 @@ body {
   padding-bottom: 4px;
 }
 
+/* ------- Exploitability chart panel ------- */
+.exploit-panel {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 16px 12px;
+  flex: 0 0 auto;
+}
+.exploit-panel .panel-title { font-weight: 600; margin-bottom: 6px; }
+.panel-sub { font-weight: 400; font-size: 11px; color: var(--text-muted); }
+.exploit-chart { position: relative; height: 120px; }
+.exploit-chart svg { display: block; width: 100%; height: 100%; }
+.exploit-empty {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.exploit-tip {
+  position: absolute;
+  pointer-events: none;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  display: none;
+}
+.exploit-tip b { color: var(--text-primary); font-size: 12px; }
+
 /* ------- Shared form controls ------- */
 label.field {
   display: flex;
@@ -186,16 +226,6 @@ label.field input {
   width: 90px;
 }
 label.field input.wide { width: 160px; }
-
-label.field-checkbox {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--text-secondary);
-  padding-bottom: 7px;
-  white-space: nowrap;
-}
 
 button.primary, button.secondary {
   font: inherit;

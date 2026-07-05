@@ -118,8 +118,6 @@ function buildLegend() {
 }
 
 function renderPosition(pos) {
-  document.getElementById('useBetSizeBuckets').checked = pos.useBetSizeBuckets;
-
   currentActionSizes = collectActionSizes(pos);
   currentPresent = collectPresentActions(pos);
 
@@ -156,11 +154,11 @@ async function fetchRandomPosition() {
   return res.json();
 }
 
-async function postConfigure(stack0, stack1, useBetSizeBuckets) {
+async function postConfigure(stack0, stack1) {
   const res = await fetch('/api/configure', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ stack0, stack1, useBetSizeBuckets }),
+    body: JSON.stringify({ stack0, stack1 }),
   });
   return res.json();
 }
@@ -224,6 +222,7 @@ async function runTraining(iterations) {
       const pct = Math.min(100, Math.round((trained / iterations) * 100));
       fill.style.width = pct + '%';
       await refreshCurrentPosition();
+      await refreshExploitChart();
       if (lastResult.cancelled) break;
       setStatus('trainStatus', `Training… ${trained}/${iterations} hands (${pct}%)`);
     }
@@ -261,15 +260,15 @@ document.getElementById('saveStacksBtn').addEventListener('click', async () => {
 
   // Both players get the same stack (single effective-stack knob).
   const stack = parseInt(document.getElementById('stack').value, 10);
-  const useBetSizeBuckets = document.getElementById('useBetSizeBuckets').checked;
   setStatus('stacksStatus', 'Saving…');
   try {
-    await postConfigure(stack, stack, useBetSizeBuckets);
+    await postConfigure(stack, stack);
     document.getElementById('history').value = '';
     document.getElementById('board0').value = '';
     document.getElementById('board1').value = '';
-    setStatus('stacksStatus', `Saved. All trained data wiped (effective stack: ${stack}, bet-size buckets: ${useBetSizeBuckets}).`, 'ok');
+    setStatus('stacksStatus', `Saved. All trained data wiped (effective stack: ${stack}).`, 'ok');
     await refreshCurrentPosition();
+    await refreshExploitChart();
   } catch (e) {
     setStatus('stacksStatus', 'Failed to save: ' + e, 'error');
   }
@@ -305,9 +304,127 @@ document.getElementById('randomBtn').addEventListener('click', async () => {
   }
 });
 
+// --- Exploitability chart: single-series SVG line, one point per 1,000 hands ---
+let exploitPoints = [];
+
+async function refreshExploitChart() {
+  try {
+    const res = await fetch('/api/exploitability');
+    exploitPoints = (await res.json()).points || [];
+  } catch (e) { /* keep the last good series */ }
+  renderExploitChart();
+}
+
+function fmtIter(n) {
+  return n >= 1000 ? n / 1000 + 'K' : String(n);
+}
+
+// 1/2/5 stepping for clean axis ticks.
+function niceStep(range, targetTicks) {
+  const raw = range / Math.max(1, targetTicks);
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  for (const m of [1, 2, 5, 10]) if (raw <= m * mag) return m * mag;
+  return 10 * mag;
+}
+
+function renderExploitChart() {
+  const host = document.getElementById('exploitChart');
+  if (!host) return;
+  if (exploitPoints.length === 0) {
+    host.innerHTML = '<div class="exploit-empty">No samples yet — a point is added every 1,000 trained hands.</div>';
+    return;
+  }
+
+  const W = host.clientWidth || 600;
+  const H = host.clientHeight || 120;
+  const M = { l: 46, r: 64, t: 8, b: 18 };
+  const iw = W - M.l - M.r;
+  const ih = H - M.t - M.b;
+
+  const maxIter = exploitPoints[exploitPoints.length - 1].iter;
+  const maxVal = Math.max(...exploitPoints.map((p) => p.value), 0);
+  const yStep = niceStep(maxVal || 1, 3);
+  const yMax = Math.max(yStep, Math.ceil((maxVal || 1) / yStep) * yStep);
+  const x = (it) => M.l + (it / maxIter) * iw;
+  const y = (v) => M.t + ih - (v / yMax) * ih;
+
+  const css = getComputedStyle(document.documentElement);
+  const accent = css.getPropertyValue('--accent').trim();
+  const grid = css.getPropertyValue('--gridline').trim();
+  const muted = css.getPropertyValue('--text-muted').trim();
+  const secondary = css.getPropertyValue('--text-secondary').trim();
+  const surface = css.getPropertyValue('--surface-1').trim();
+
+  let s = `<svg width="${W}" height="${H}" font-family="inherit">`;
+
+  // Recessive hairline grid + left tick labels (clean 1/2/5 values).
+  for (let v = 0; v <= yMax + 1e-9; v += yStep) {
+    s += `<line x1="${M.l}" y1="${y(v)}" x2="${M.l + iw}" y2="${y(v)}" stroke="${grid}" stroke-width="1"/>`;
+    s += `<text x="${M.l - 6}" y="${y(v) + 3.5}" text-anchor="end" font-size="10" fill="${muted}" style="font-variant-numeric:tabular-nums">${+v.toFixed(4)}</text>`;
+  }
+  const xStep = niceStep(maxIter, 5);
+  for (let it = xStep; it <= maxIter + 1e-9; it += xStep) {
+    s += `<text x="${x(it)}" y="${M.t + ih + 13}" text-anchor="middle" font-size="10" fill="${muted}" style="font-variant-numeric:tabular-nums">${fmtIter(it)}</text>`;
+  }
+
+  // Area wash + 2px line, both in the single series hue.
+  const pts = exploitPoints.map((p) => `${x(p.iter).toFixed(1)},${y(p.value).toFixed(1)}`);
+  if (exploitPoints.length > 1) {
+    s += `<path d="M${pts.join('L')}L${x(maxIter).toFixed(1)},${y(0)}L${x(exploitPoints[0].iter).toFixed(1)},${y(0)}Z" fill="${accent}" opacity="0.1"/>`;
+    s += `<path d="M${pts.join('L')}" fill="none" stroke="${accent}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+  }
+
+  // End dot with a surface ring, plus a direct label for the latest value.
+  const last = exploitPoints[exploitPoints.length - 1];
+  s += `<circle cx="${x(last.iter)}" cy="${y(last.value)}" r="4" fill="${accent}" stroke="${surface}" stroke-width="2"/>`;
+  s += `<text x="${x(last.iter) + 8}" y="${y(last.value) + 3.5}" font-size="11" fill="${secondary}" style="font-variant-numeric:tabular-nums">${last.value.toFixed(3)}</text>`;
+
+  // Crosshair (snaps to the nearest sample) + transparent hover layer.
+  s += `<line id="exCross" x1="0" y1="${M.t}" x2="0" y2="${M.t + ih}" stroke="${muted}" stroke-width="1" visibility="hidden"/>`;
+  s += `<circle id="exHoverDot" r="4" fill="${accent}" stroke="${surface}" stroke-width="2" visibility="hidden"/>`;
+  s += `<rect x="${M.l}" y="${M.t}" width="${iw}" height="${ih}" fill="transparent"/>`;
+  s += '</svg><div class="exploit-tip" id="exTip"></div>';
+  host.innerHTML = s;
+
+  const svg = host.querySelector('svg');
+  const cross = host.querySelector('#exCross');
+  const hoverDot = host.querySelector('#exHoverDot');
+  const tip = host.querySelector('#exTip');
+
+  svg.addEventListener('pointermove', (ev) => {
+    const px = ev.clientX - host.getBoundingClientRect().left;
+    let best = exploitPoints[0];
+    for (const p of exploitPoints) if (Math.abs(x(p.iter) - px) < Math.abs(x(best.iter) - px)) best = p;
+    cross.setAttribute('x1', x(best.iter));
+    cross.setAttribute('x2', x(best.iter));
+    cross.setAttribute('visibility', 'visible');
+    hoverDot.setAttribute('cx', x(best.iter));
+    hoverDot.setAttribute('cy', y(best.value));
+    hoverDot.setAttribute('visibility', 'visible');
+    tip.innerHTML = '';
+    const b = document.createElement('b');
+    b.textContent = best.value.toFixed(4);
+    tip.appendChild(b);
+    tip.appendChild(document.createTextNode(` chips/hand · hand ${best.iter.toLocaleString()}`));
+    tip.style.display = 'block';
+    const flip = x(best.iter) > W - 150;
+    tip.style.left = flip ? '' : x(best.iter) + 10 + 'px';
+    tip.style.right = flip ? W - x(best.iter) + 10 + 'px' : '';
+    tip.style.top = Math.max(0, y(best.value) - 30) + 'px';
+  });
+  svg.addEventListener('pointerleave', () => {
+    cross.setAttribute('visibility', 'hidden');
+    hoverDot.setAttribute('visibility', 'hidden');
+    tip.style.display = 'none';
+  });
+}
+
+window.addEventListener('resize', renderExploitChart);
+
 // Initial load: fetch the action config once, then show the default
 // preflop root position.
 (async function initLive() {
   await loadActionConfig();
   await refreshCurrentPosition();
+  await refreshExploitChart();
 })();

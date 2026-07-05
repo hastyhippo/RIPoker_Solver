@@ -19,7 +19,6 @@ void test_strategy_sums_to_one(CFRSolver &cfr);
 namespace {
     const long long PROGRESS_EVERY_N_HANDS = 100;
     const long long EXPLOIT_EVERY_N_HANDS = 500;
-    const int EXPLOIT_SAMPLES = 200;
     const int TOP_NODES_FOR_REPORT = 25;
     const int MIN_VISITS_FOR_EXPORT = 5;
     const char *EXPORT_PATH = "solver_export.json";
@@ -48,7 +47,7 @@ int main(int argc, char **argv) {
     // Regression guard: confirm MakeMove/UnmakeMove round-trip symmetry
     // before spending any time training.
     {
-        Game sanity(STARTING_STACK, STARTING_STACK, false);
+        Game sanity(STARTING_STACK, STARTING_STACK);
         sanity.InitialiseGame(0);
         test_make_unmake(sanity);
     }
@@ -63,8 +62,7 @@ int main(int argc, char **argv) {
                 Display::PrintTrainingProgress(i + 1, iterations, cfr.positionMap.size());
             }
             if (cfr.iteration % EXPLOIT_EVERY_N_HANDS == 0) {
-                double exploitability = cfr.EstimateExploitability(EXPLOIT_SAMPLES);
-                Display::PrintExploitability(cfr.iteration, exploitability);
+                Display::PrintExploitability(cfr.iteration, cfr.ComputeExploitability());
             }
         }
         cout << "Enter number of hands to train (0 to stop training): ";
@@ -124,7 +122,7 @@ void test_make_unmake(Game g) {
 void test_strategy_sums_to_one(CFRSolver &cfr) {
     const double EPSILON = 1e-3;
     for (auto &entry : cfr.positionMap) {
-        Node *node = entry.second;
+        Node *node = &entry.second;
         vector<double> strat = node->GetFinalStrategy(node->possible_actions);
         double sum = 0.0;
         for (int i = 0; i < NUM_ACTIONS; i++) {

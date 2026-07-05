@@ -18,23 +18,16 @@ vector<double> bet_sizings = {0.33, 0.75, 1.25};
 vector<double> raise_sizings = {2.2, 2.6, 3, 4};
 vector<string> move_names = {"Check", "Call", "Fold", "Allin", "B33", "B75", "B125", "R2.2", "R2.6", "R3", "R4"};
 
-bool isNumber(const string& s) {
-    return !s.empty() && all_of(s.begin(), s.end(), ::isdigit);
-}
-
-
-Game::Game(int stack0, int stack1, bool useBetSizeBuckets) {
+Game::Game(int stack0, int stack1) {
     this->deck = Deck();
     // Create the cards that the players receive
     this->hands = vector<Card>(NUM_PLAYERS);
     this->board = vector<Card>(2);
     this->effective_stack = {stack0, stack1};
-    this->chips = {stack0, stack1};
     this->pot = 0;
     this->abstractHistory = "";
     this->player = 0;
     this->stage = 0;
-    this->useBetSizeBuckets = useBetSizeBuckets;
 }
 
 // GetUtility() is from `player`'s (inconsistent) perspective; re-express it
@@ -71,8 +64,10 @@ string Game::PrintGame(bool print) {
     str +=  "Board: " + board[0].getName() + " | " + board[1].getName() + '\n'; 
     str += "Pot: " + to_string(pot) + '\n';
     str += "\nMoveHistory: ";
-    for (auto a : moveHistory) {
-        str += a + " ";
+    for (const Move &m : moveHistory) {
+        if (m.kind == Move::StreetClose) str += "| ";
+        else if (m.kind == Move::Fold) str += to_string(m.player) + "F ";
+        else str += to_string(m.player) + "B" + to_string(m.amount) + " ";
     }
     str += "\nAbstractedHistory:" + abstractHistory + "\n";
 
@@ -205,16 +200,16 @@ void Game::MakeMove(int move_type) {
 
     if (move_type == CHECK) {
         // if last move is also a check, skip to next stage
-        if (!moveHistory.empty() && 
-        moveHistory.back().length() == 3 && moveHistory.back().substr(1,2) == "B0") {
+        if (!moveHistory.empty() &&
+        moveHistory.back().kind == Move::Chips && moveHistory.back().amount == 0) {
             stage++;
             update_stage = true;
         }
-        moveHistory.push_back(to_string(player) + "B0");
-        abstractHistory += Node::GetBetAction(pot, 0, useBetSizeBuckets);
+        moveHistory.push_back({Move::Chips, (int8_t)player, 0});
+        abstractHistory += Node::GetBetAction(0);
 
     } else if (move_type == FOLD) {
-        moveHistory.push_back(to_string(player) + "F");
+        moveHistory.push_back({Move::Fold, (int8_t)player, 0});
         terminal = true;
         abstractHistory += 'f';
     }
@@ -223,7 +218,7 @@ void Game::MakeMove(int move_type) {
         // accounting: uncontested excess still lands in the shared pot.
         int call_size = min(bet_states[stage][1 - player] - bet_states[stage][player], effective_stack[player]);
 
-        moveHistory.push_back(to_string(player) + "B" + to_string(call_size));
+        moveHistory.push_back({Move::Chips, (int8_t)player, call_size});
         abstractHistory += 'c';
         effective_stack[player] -= call_size;
         bet_states[stage][player] += call_size;
@@ -241,7 +236,7 @@ void Game::MakeMove(int move_type) {
         }
     } else if (move_type == ALLIN) {
         // equivalent of betting whole stack
-        moveHistory.push_back(to_string(player) + "B" + to_string(effective_stack[player]));
+        moveHistory.push_back({Move::Chips, (int8_t)player, effective_stack[player]});
         abstractHistory += 'a';
         assert(effective_stack[player] > 0);
         bet_states[stage][player] += effective_stack[player];
@@ -255,8 +250,8 @@ void Game::MakeMove(int move_type) {
         effective_stack[player] -= bet_size;
         bet_states[stage][player] = bet_size;
 
-        moveHistory.push_back(to_string(player) + "B" + to_string(bet_size));
-        abstractHistory += Node::GetBetAction(pot, bet_size, useBetSizeBuckets);
+        moveHistory.push_back({Move::Chips, (int8_t)player, bet_size});
+        abstractHistory += Node::GetBetAction(bet_size);
     } else if (move_type >= MISC_ACTIONS + NUM_BETS && move_type <= MISC_ACTIONS + NUM_BETS + NUM_RAISES) {
         //Raise
         int raise_size = bet_states[stage][1 - player] * raise_sizings[move_type - (MISC_ACTIONS + NUM_BETS)];
@@ -266,14 +261,14 @@ void Game::MakeMove(int move_type) {
         effective_stack[player] -= extra_chips;
         bet_states[stage][player] = raise_size;
 
-        moveHistory.push_back(to_string(player) + "B" + to_string(extra_chips));
-        abstractHistory += Node::GetRaiseAction(raise_size, bet_states[stage][1-player], useBetSizeBuckets);
+        moveHistory.push_back({Move::Chips, (int8_t)player, extra_chips});
+        abstractHistory += Node::GetRaiseAction(raise_size);
     }
 
 
     if (update_stage) {
         // Indicate new chance node and next stage
-        moveHistory.push_back("|");
+        moveHistory.push_back({Move::StreetClose, -1, 0});
         abstractHistory += ",";
         player = first_to_act;
 
@@ -308,34 +303,33 @@ void PopAbstractHistoryToken(string &abstractHistory) {
 void Game::UnmakeMove() {
     assert(!moveHistory.empty());
     terminal = false;
-    string last_move = moveHistory.back();
+    Move last = moveHistory.back();
 
-    if (last_move[1] == 'F') {
+    if (last.kind == Move::Fold) {
         moveHistory.pop_back();
         PopAbstractHistoryToken(abstractHistory);
-        player = last_move[0] - '0';
+        player = last.player;
         return;
-    } else if (last_move == "|") {
+    } else if (last.kind == Move::StreetClose) {
         stage--;
         // Undo the street-close pot bump (bet_states may be unequal after a
         // capped call; the subtraction doesn't depend on equality).
         pot -= bet_states[stage][0] + bet_states[stage][1];
         moveHistory.pop_back();
         PopAbstractHistoryToken(abstractHistory);
-        last_move = moveHistory.back();
+        last = moveHistory.back();
     }
     assert(!moveHistory.empty());
 
     moveHistory.pop_back();
     PopAbstractHistoryToken(abstractHistory);
-    player = last_move[0] - '0';
-    int bet_size = stoi(last_move.substr(2,last_move.length()-2));
-    bet_states[stage][player] -= bet_size;
-    effective_stack[player] += bet_size;
+    player = last.player;
+    bet_states[stage][player] -= last.amount;
+    effective_stack[player] += last.amount;
 }
 
 Game Game::ReplayExactHistory(int stack0, int stack1, const string &history, bool &ok) {
-    Game g(stack0, stack1, false);
+    Game g(stack0, stack1);
     g.InitialiseGame(0);
     ok = true;
 

@@ -53,7 +53,7 @@ struct NodeGroup {
     int visits = 0;
     vector<HandRow> hands;
     // Chip amount per bet/raise/all-in action, keyed by move_names; empty when
-    // the history couldn't be replayed (bucketed mode).
+    // the history couldn't be replayed.
     unordered_map<string, int> actionChipSize;
 };
 
@@ -102,11 +102,11 @@ void WriteSolverJSON(CFRSolver &cfr, const string &path, int minVisits) {
     unordered_map<string, NodeGroup> groups;
 
     for (auto &entry : cfr.positionMap) {
-        int visits = cfr.positionCount[entry.first];
+        int visits = entry.second.visits;
         if (visits < minVisits) continue;
 
         ParsedHash p = Node::ParseHash(entry.first);
-        Node *node = entry.second;
+        Node *node = &entry.second;
 
         string key = GroupKey(p);
         auto it = groups.find(key);
@@ -139,22 +139,15 @@ void WriteSolverJSON(CFRSolver &cfr, const string &path, int minVisits) {
         it->second.hands.push_back(hr);
     }
 
-    // Bucketed letter each action maps to, for the static viewer's
-    // click-navigation. A large reference pot avoids truncation drift.
-    const int REF = 100000;
+    // History token each fixed action maps to, for the static viewer's
+    // click-navigation. Bets/raises record an exact chip amount ("[N]"/"{N}")
+    // that varies per position, so they have no single stable letter and are
+    // intentionally omitted here (the viewer skips actions it can't resolve).
     vector<pair<string, string>> actionLetters;
-    actionLetters.push_back({"Check", Node::GetBetAction(REF, 0, true)});
+    actionLetters.push_back({"Check", "0"});
     actionLetters.push_back({"Call", "c"});
     actionLetters.push_back({"Fold", "f"});
     actionLetters.push_back({"Allin", "a"});
-    for (int dx = 0; dx < NUM_BETS; dx++) {
-        int betSize = (int)(REF * bet_sizings[dx]);
-        actionLetters.push_back({move_names[MISC_ACTIONS + dx], Node::GetBetAction(REF, betSize, true)});
-    }
-    for (int dx = 0; dx < NUM_RAISES; dx++) {
-        int raiseSize = (int)(REF * raise_sizings[dx]);
-        actionLetters.push_back({move_names[MISC_ACTIONS + NUM_BETS + dx], Node::GetRaiseAction(raiseSize, REF, true)});
-    }
 
     ofstream out(path);
     out << fixed << setprecision(4);
