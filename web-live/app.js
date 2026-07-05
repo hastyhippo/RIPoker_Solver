@@ -58,9 +58,8 @@ let currentPresent = new Set();
 
 function collectActionSizes(pos) {
   const sizes = {};
-  for (const h of pos.hands) {
-    if (!h) continue;
-    for (const s of h.strategy) {
+  for (const row of pos.rows) {
+    for (const s of row.strategy) {
       if (s.size !== undefined && s.size !== null) sizes[s.action] = s.size;
     }
   }
@@ -69,13 +68,83 @@ function collectActionSizes(pos) {
 
 function collectPresentActions(pos) {
   const present = new Set();
-  for (const h of pos.hands) if (h) for (const s of h.strategy) present.add(s.action);
+  for (const row of pos.rows) for (const s of row.strategy) present.add(s.action);
   return present;
 }
 
+// --- Backends --------------------------------------------------------------
+// The exact same UI runs two ways: against the local C++ server (fetch), or,
+// when deployed to a static host, against the solver compiled to WebAssembly
+// running in this page. Both expose the same async methods; BACKEND is picked
+// once at startup. This is what makes the deployed page identical to local.
+
+const ServerBackend = {
+  label: 'server',
+  canTrain: true,
+  async init() { /* server is already running */ },
+  async actions() { return (await fetch('/api/actions')).json(); },
+  async configure(s0, s1) {
+    return (await fetch('/api/configure', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stack0: s0, stack1: s1 }),
+    })).json();
+  },
+  async train(iters) {
+    return (await fetch('/api/train', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ iterations: iters }),
+    })).json();
+  },
+  async cancelTrain() { await fetch('/api/train/cancel', { method: 'POST' }); },
+  async position(history, b0, b1) {
+    const params = new URLSearchParams({ history: history || '' });
+    if (b0) params.set('board0', b0);
+    if (b1) params.set('board1', b1);
+    return (await fetch('/api/position?' + params.toString())).json();
+  },
+  async randomPosition() { return (await fetch('/api/random-position')).json(); },
+  async exploitability() { return (await fetch('/api/exploitability')).json(); },
+};
+
+// Wraps the emscripten module; each wasm* export returns a JSON string.
+function makeWasmBackend(mod) {
+  return {
+    label: 'wasm',
+    canTrain: true,
+    async init() {},
+    async actions() { return JSON.parse(mod.wasmActions()); },
+    async configure(s0, s1) { return JSON.parse(mod.wasmConfigure(s0, s1)); },
+    async train(iters) { return JSON.parse(mod.wasmTrain(iters)); },
+    async cancelTrain() { /* chunk loop stops client-side; nothing server-side */ },
+    async position(history, b0, b1) { return JSON.parse(mod.wasmPosition(history || '', b0 || '', b1 || '')); },
+    async randomPosition() { return JSON.parse(mod.wasmRandomPosition()); },
+    async exploitability() { return JSON.parse(mod.wasmExploitability()); },
+  };
+}
+
+let BACKEND = ServerBackend;
+
+// Prefer the live C++ server when it answers (local `--serve`); otherwise fall
+// back to the in-page WASM engine (static/GitHub Pages deploy).
+async function selectBackend() {
+  try {
+    const res = await fetch('/api/actions', { cache: 'no-store' });
+    if (res.ok) { BACKEND = ServerBackend; return; }
+  } catch (e) { /* no server here - use WASM */ }
+
+  if (typeof createSolverModule === 'function') {
+    const mod = await createSolverModule();
+    BACKEND = makeWasmBackend(mod);
+    // No server pre-seeded a baseline, so configure once to match the default.
+    const stack = parseInt(document.getElementById('stack').value, 10) || 10;
+    await BACKEND.configure(stack, stack);
+    return;
+  }
+  BACKEND = ServerBackend; // no server and no WASM; calls will surface the error
+}
+
 async function loadActionConfig() {
-  const res = await fetch('/api/actions');
-  const cfg = await res.json();
+  const cfg = await BACKEND.actions();
   ACTION_ORDER = cfg.actionOrder.slice();
   // Move Allin to the end so bars/legend read passive -> bet sizes -> all-in.
   const allinIdx = ACTION_ORDER.indexOf('Allin');
@@ -155,54 +224,45 @@ function renderPosition(pos) {
   }
   html += buildLegend();
 
-  // pos.hands is always 6 entries (index = hand value), each an object or null
-  pos.hands.forEach((hand, i) => {
-    html += '<div class="hand-row">';
-    if (!hand) {
-      html += `<div class="rank">${RANK_LABELS[i] ?? '?'}</div><div class="null-strategy">null</div><div class="visits"></div>`;
-    } else {
-      html += `<div class="rank">${hand.rank}</div>${renderBar(hand.strategy)}<div class="visits">${hand.visits} visits</div>`;
+  if (pos.rows.length === 0) {
+    html += '<div class="null-strategy">No trained data for this position.</div>';
+  } else {
+    // One row per (card, flush category). Preflop has a single row per card;
+    // flop+ splits each card into flush-draw / no-flush-draw variants.
+    let prevRank = null;
+    for (const row of pos.rows) {
+      const groupSep = prevRank !== null && row.rank !== prevRank ? ' rank-start' : '';
+      prevRank = row.rank;
+      html += `<div class="hand-row${groupSep}">`;
+      html += `<div class="rank">${row.rank}</div>`;
+      html += `<div class="flush-tag">${row.flushLabel ?? ''}</div>`;
+      html += renderBar(row.strategy);
+      html += `<div class="visits">${row.visits} visits</div>`;
+      html += '</div>';
     }
-    html += '</div>';
-  });
+  }
 
   document.getElementById('results').innerHTML = html;
 }
 
 async function fetchPosition(history, board0, board1) {
-  const params = new URLSearchParams({ history: history || '' });
-  if (board0) params.set('board0', board0);
-  if (board1) params.set('board1', board1);
-  const res = await fetch('/api/position?' + params.toString());
-  return res.json();
+  return BACKEND.position(history, board0, board1);
 }
 
 async function fetchRandomPosition() {
-  const res = await fetch('/api/random-position');
-  return res.json();
+  return BACKEND.randomPosition();
 }
 
 async function postConfigure(stack0, stack1) {
-  const res = await fetch('/api/configure', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ stack0, stack1 }),
-  });
-  return res.json();
+  return BACKEND.configure(stack0, stack1);
 }
 
 async function postTrain(iterations) {
-  const res = await fetch('/api/train', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ iterations }),
-  });
-  return res.json();
+  return BACKEND.train(iterations);
 }
 
 async function postCancelTrain() {
-  const res = await fetch('/api/train/cancel', { method: 'POST' });
-  return res.json();
+  return BACKEND.cancelTrain();
 }
 
 function currentPositionInputs() {
@@ -337,8 +397,7 @@ let exploitPoints = [];
 
 async function refreshExploitChart() {
   try {
-    const res = await fetch('/api/exploitability');
-    exploitPoints = (await res.json()).points || [];
+    exploitPoints = (await BACKEND.exploitability()).points || [];
   } catch (e) { /* keep the last good series */ }
   renderExploitChart();
 }
@@ -452,9 +511,10 @@ function renderExploitChart() {
 
 window.addEventListener('resize', renderExploitChart);
 
-// Initial load: fetch the action config once, then show the default
-// preflop root position.
+// Initial load: pick the backend (WASM if deployed, else the local server),
+// fetch the action config, then show the default preflop root position.
 (async function initLive() {
+  await selectBackend();
   await loadActionConfig();
   await refreshCurrentPosition();
   await refreshExploitChart();

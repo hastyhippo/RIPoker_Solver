@@ -2,4 +2,9 @@
 *.d
 poker_solver
 solver_export.json
+solver_data.json
 _site/
+
+# emscripten build artifacts (CI rebuilds these for the Pages deploy)
+web-live/solver.js
+web-live/solver.wasm

@@ -15,7 +15,7 @@ namespace {
 // Seeded once per thread; the old per-shuffle random_device+mt19937
 // construction was a large fixed cost on every hand in the CFR loop.
 mt19937 &Rng() {
-    static thread_local mt19937 rng{random_device{}()};
+    static thread_local mt19937 rng{RandomSeed()};
     return rng;
 }
 }

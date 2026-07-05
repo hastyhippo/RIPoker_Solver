@@ -364,13 +364,23 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 5px 0;
+  padding: 3px 0;
   border-bottom: 1px solid var(--gridline);
 }
 .hand-row:last-child { border-bottom: none; }
+/* A hairline above the first row of each new card groups its flush variants. */
+.hand-row.rank-start { border-top: 1px solid var(--border); }
 .hand-row .rank {
-  width: 24px;
+  width: 20px;
   font-weight: 600;
+}
+.hand-row .flush-tag {
+  width: 96px;
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .hand-row .visits {
   width: 70px;
@@ -379,7 +389,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.hand-row .null-strategy {
+.null-strategy {
   color: var(--text-muted);
   font-style: italic;
 }

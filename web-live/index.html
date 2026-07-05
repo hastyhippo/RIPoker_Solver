@@ -73,6 +73,10 @@
   </section>
 </div>
 
+<!-- The WASM engine (present only in the static/Pages build). Missing locally
+     under `--serve`, where the page uses the live server instead - a 404 here
+     is harmless and app.js falls back to the server automatically. -->
+<script src="solver.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

@@ -7,8 +7,8 @@ CXXFLAGS = -Wall -std=c++17 -O2 -pthread -I./src -MMD -MP
 # Executable name
 TARGET = poker_solver
 
-# Source files
-SRCS = $(wildcard src/*.cpp)
+# Source files (wasm_api.cpp is emscripten-only; see build-wasm.sh)
+SRCS = $(filter-out src/wasm_api.cpp,$(wildcard src/*.cpp))
 
 # Object files (replace .cpp with .o)
 OBJS = $(SRCS:.cpp=.o)

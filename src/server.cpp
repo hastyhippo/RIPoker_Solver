@@ -18,23 +18,11 @@
 #include "game.h"
 #include "defines.h"
 #include "display.h"
+#include "position.h"
 
 using namespace std;
 
 namespace {
-
-string RankName(int value) {
-    Card c(value * 4);
-    string name = c.getName();
-    return name.substr(0, name.find(" of"));
-}
-
-int RankValue(const string &label) {
-    for (int i = 0; i < NUM_CARDS / 4; i++) {
-        if (RankName(i) == label) return i;
-    }
-    return 0;
-}
 
 void WriteJSONString(ostream &out, const string &s) {
     out << '"';
@@ -59,132 +47,6 @@ int ExtractJSONInt(const string &body, const string &key, int def) {
     while (pos < body.size() && isdigit((unsigned char)body[pos])) pos++;
     if (pos == start || (pos == start + 1 && body[start] == '-')) return def;
     return stoi(body.substr(start, pos - start));
-}
-
-struct BestMatch {
-    bool found = false;
-    int visits = 0;
-    Node *node = nullptr;
-};
-
-// Strategy at a position. pot/bet come from replaying the exact history (else
-// null hands); flush variants are scanned per hand, most-visited wins.
-string BuildPositionJSON(CFRSolver &cfr, int stage, int board0Val, int board1Val, const string &history) {
-    const int numHandValues = NUM_CARDS / 4;
-    vector<BestMatch> bestPerHand(numHandValues);
-
-    bool replayOk = false;
-    Game replayed = Game::ReplayExactHistory(cfr.stack0, cfr.stack1, history, replayOk);
-    int pot = replayOk ? replayed.KeyPot() : 0;
-    int bet = replayOk ? replayed.KeyBet() : 0;
-
-    // Chip amount per offered bet/raise/all-in (same bases MakeMove uses).
-    unordered_map<string, int> actionChipSize;
-    if (replayOk) {
-        for (int dx = 0; dx < NUM_BETS; dx++) {
-            actionChipSize[move_names[MISC_ACTIONS + dx]] = (int)(bet_sizings[dx] * replayed.pot);
-        }
-        int facing = replayed.bet_states[replayed.stage][1 - replayed.player];
-        for (int dx = 0; dx < NUM_RAISES; dx++) {
-            actionChipSize[move_names[MISC_ACTIONS + NUM_BETS + dx]] = (int)(raise_sizings[dx] * facing);
-        }
-        // All-in = whole remaining stack (largest bet -> darkest on the ramp).
-        actionChipSize["Allin"] = replayed.effective_stack[replayed.player];
-    }
-
-    if (replayOk) {
-        for (int handVal = 0; handVal < numHandValues; handVal++) {
-            int flushCount = (stage >= FLOP) ? 4 : 1;
-            for (int flushInfo = 0; flushInfo < flushCount; flushInfo++) {
-                string key = Node::BuildKey(handVal, board0Val, board1Val, flushInfo, stage, pot, bet, history);
-                auto it = cfr.positionMap.find(key);
-                if (it == cfr.positionMap.end()) continue;
-                if (it->second.visits > bestPerHand[handVal].visits) {
-                    bestPerHand[handVal] = {true, it->second.visits, &it->second};
-                }
-            }
-        }
-    }
-
-    int totalVisits = 0;
-    for (auto &b : bestPerHand) if (b.found) totalVisits += b.visits;
-
-    // Step-by-step trail of the line so the frontend can draw the action tree.
-    bool trailOk = false;
-    vector<TrailStep> trail;
-    if (replayOk) trail = Game::BuildTrail(cfr.stack0, cfr.stack1, history, trailOk);
-
-    ostringstream out;
-    out << fixed << setprecision(4);
-    out << "{\n  \"stage\": " << stage << ",\n  \"board\": [";
-    if (stage >= FLOP) WriteJSONString(out, RankName(board0Val)); else out << "null";
-    out << ", ";
-    if (stage >= TURN) WriteJSONString(out, RankName(board1Val)); else out << "null";
-    out << "],\n  \"pot\": " << pot << ",\n  \"bet\": " << bet << ",\n  \"history\": ";
-    WriteJSONString(out, history);
-
-    out << ",\n  \"trail\": ";
-    if (!trailOk) {
-        out << "null";
-    } else {
-        out << "[\n";
-        for (size_t t = 0; t < trail.size(); t++) {
-            const TrailStep &s = trail[t];
-            out << "    ";
-            if (s.isReveal) {
-                out << "{\"type\": \"card\", \"card\": ";
-                WriteJSONString(out, RankName(s.revealSlot == 0 ? board0Val : board1Val));
-                out << "}";
-            } else {
-                out << "{\"type\": \"decision\", \"player\": " << s.player << ", \"chosen\": ";
-                if (s.chosen < 0) out << "null";
-                else WriteJSONString(out, move_names[s.chosen]);
-                out << ", \"actions\": [";
-                for (size_t j = 0; j < s.legal.size(); j++) {
-                    out << "{\"action\": ";
-                    WriteJSONString(out, move_names[s.legal[j]]);
-                    if (s.chipSize[j] >= 0) out << ", \"size\": " << s.chipSize[j];
-                    out << "}";
-                    if (j + 1 < s.legal.size()) out << ", ";
-                }
-                out << "]}";
-            }
-            out << (t + 1 < trail.size() ? ",\n" : "\n");
-        }
-        out << "  ]";
-    }
-
-    out << ",\n  \"visits\": " << totalVisits
-        << ",\n  \"hands\": [\n";
-
-    for (int handVal = 0; handVal < numHandValues; handVal++) {
-        BestMatch &b = bestPerHand[handVal];
-        out << "    ";
-        if (!b.found) {
-            out << "null";
-        } else {
-            vector<double> strat = b.node->GetFinalStrategy(b.node->possible_actions);
-            out << "{\"rank\": ";
-            WriteJSONString(out, RankName(handVal));
-            out << ", \"visits\": " << b.visits << ", \"strategy\": [";
-            bool first = true;
-            for (int i = 0; i < NUM_ACTIONS; i++) {
-                if (!b.node->possible_actions[i]) continue;
-                if (!first) out << ", ";
-                first = false;
-                out << "{\"action\": ";
-                WriteJSONString(out, move_names[i]);
-                out << ", \"prob\": " << strat[i];
-                auto sizeIt = actionChipSize.find(move_names[i]);
-                if (sizeIt != actionChipSize.end()) out << ", \"size\": " << sizeIt->second;
-                out << "}";
-            }
-            out << "]}";
-        }
-        out << (handVal + 1 < numHandValues ? ",\n" : "\n");
-    }
-    out << "  ]\n}\n";
-    return out.str();
 }
 
 } // namespace
@@ -286,16 +148,16 @@ void Start(CFRSolver &cfr, int port) {
         int stage = (int)count(history.begin(), history.end(), ',');
         if (stage > TURN) stage = TURN;
         int board0Val = 0, board1Val = 0;
-        if (stage >= FLOP) board0Val = RankValue(req.get_param_value("board0"));
-        if (stage >= TURN) board1Val = RankValue(req.get_param_value("board1"));
+        if (stage >= FLOP) board0Val = Position::RankValue(req.get_param_value("board0"));
+        if (stage >= TURN) board1Val = Position::RankValue(req.get_param_value("board1"));
         lock_guard<mutex> lock(solverMutex);
-        res.set_content(BuildPositionJSON(cfr, stage, board0Val, board1Val, history), "application/json");
+        res.set_content(Position::BuildJSON(cfr, stage, board0Val, board1Val, history), "application/json");
     });
 
     svr.Get("/api/random-position", [&](const httplib::Request &, httplib::Response &res) {
         lock_guard<mutex> lock(solverMutex);
         if (cfr.positionMap.empty()) {
-            res.set_content(BuildPositionJSON(cfr, PREFLOP, 0, 0, ""), "application/json");
+            res.set_content(Position::BuildJSON(cfr, PREFLOP, 0, 0, ""), "application/json");
             return;
         }
         // Reservoir sampling of size 1: single pass, uniform over all keys,
@@ -308,7 +170,7 @@ void Start(CFRSolver &cfr, int port) {
             if (dist(rng) == seen) chosenKey = kv.first;
         }
         ParsedHash p = Node::ParseHash(chosenKey);
-        res.set_content(BuildPositionJSON(cfr, p.stage, p.board0Val, p.board1Val, p.abstractHistory), "application/json");
+        res.set_content(Position::BuildJSON(cfr, p.stage, p.board0Val, p.board1Val, p.abstractHistory), "application/json");
     });
 
     // Pre-listen, so the page shows the uniform baseline on first load.

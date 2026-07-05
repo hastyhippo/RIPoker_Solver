@@ -1,3 +1,22 @@
+#pragma once
+#include <cstdint>
+#include <chrono>
+#ifndef __EMSCRIPTEN__
+#include <random>
+#endif
+
+// Seed for the mt19937 generators. In native builds this is std::random_device;
+// in the browser (WASM) that routes through getentropy -> crypto.getRandomValues,
+// which Chrome rejects over the growable heap - so seed from the clock instead.
+inline uint32_t RandomSeed() {
+#ifdef __EMSCRIPTEN__
+    static uint32_t counter = 0;
+    return (uint32_t)std::chrono::steady_clock::now().time_since_epoch().count() + counter++;
+#else
+    return std::random_device{}();
+#endif
+}
+
 #define PREFLOP 0
 #define FLOP 1
 #define TURN 2

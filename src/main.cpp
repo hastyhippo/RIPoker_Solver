@@ -2,6 +2,8 @@
 #include <cstdint>
 #include <cmath>
 #include <map>
+#include <vector>
+#include <utility>
 #include "game.h"
 
 #include "cassert"
@@ -18,7 +20,8 @@ void test_strategy_sums_to_one(CFRSolver &cfr);
 
 namespace {
     const long long PROGRESS_EVERY_N_HANDS = 100;
-    const long long EXPLOIT_EVERY_N_HANDS = 10000;
+    const long long EXPLOIT_EVERY_N_HANDS = 1000;
+    const int EXPLOIT_MC_CHANCE = 4; // Monte-Carlo board reveals, matches the server
     const int TOP_NODES_FOR_REPORT = 25;
     const int MIN_VISITS_FOR_EXPORT = 5;
     const char *EXPORT_PATH = "solver_export.json";
@@ -70,7 +73,7 @@ int main(int argc, char **argv) {
                 Display::PrintTrainingProgress(i + 1, iterations, cfr.positionMap.size());
             }
             if (cfr.iteration % EXPLOIT_EVERY_N_HANDS == 0) {
-                Display::PrintExploitability(cfr.iteration, cfr.ComputeExploitability());
+                Display::PrintExploitability(cfr.iteration, cfr.ComputeExploitability(EXPLOIT_MC_CHANCE));
             }
         }
         cout << "Enter number of hands to train (0 to stop training): ";

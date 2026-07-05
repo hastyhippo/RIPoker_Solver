@@ -252,7 +252,7 @@ vector<double> CFRSolver::BRWalk(Game &g, int br_player, const vector<double> &o
             }
             double weight = 1.0;
             if (brChanceSamples > 0 && (int)cands.size() > brChanceSamples) {
-                static thread_local mt19937 rng{random_device{}()};
+                static thread_local mt19937 rng{RandomSeed()};
                 // Partial Fisher-Yates: first k entries become the sample.
                 for (int i = 0; i < brChanceSamples; i++) {
                     uniform_int_distribution<int> d(i, (int)cands.size() - 1);
@@ -263,7 +263,13 @@ vector<double> CFRSolver::BRWalk(Game &g, int br_player, const vector<double> &o
             }
 
             // The flop fan-out runs in parallel; deeper levels stay sequential.
+            // WASM on GitHub Pages has no SharedArrayBuffer (no COOP/COEP), so
+            // std::async threads aren't available - run fully sequential there.
+#ifdef __EMSCRIPTEN__
+            bool parallel = false;
+#else
             bool parallel = (stageBefore == PREFLOP);
+#endif
             vector<pair<int, future<vector<double>>>> futs;
             for (int c : cands) {
                 vector<double> reachC = childReach;
