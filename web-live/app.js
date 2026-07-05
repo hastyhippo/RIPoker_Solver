@@ -279,6 +279,24 @@ async function refreshCurrentPosition() {
   renderPosition(pos);
 }
 
+// Yields a real macrotask so the browser can paint and handle input between
+// training chunks. In WASM mode each chunk runs synchronously on the main
+// thread, so an `await` on a resolved promise is only a microtask - the browser
+// drains all microtasks before rendering or dispatching clicks, leaving the UI
+// (Cancel, Look up, typing) frozen for the whole run. A macrotask hands control
+// back. MessageChannel avoids setTimeout's ~4ms clamp; both are fallbacks.
+const _yieldChannel = typeof MessageChannel !== 'undefined' ? new MessageChannel() : null;
+function yieldToBrowser() {
+  if (window.scheduler && typeof window.scheduler.yield === 'function') return window.scheduler.yield();
+  if (_yieldChannel) {
+    return new Promise((resolve) => {
+      _yieldChannel.port1.onmessage = () => resolve();
+      _yieldChannel.port2.postMessage(0);
+    });
+  }
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 // Tracks the in-flight training run so Save/Cancel can stop it and wait -
 // the server has no locking, so a concurrent Reset() would be a real race.
 let trainingCancelRequested = false;
@@ -313,6 +331,9 @@ async function runTraining(iterations) {
       await refreshExploitChart();
       if (lastResult.cancelled) break;
       setStatus('trainStatus', `Training… ${trained}/${iterations} hands (${pct}%)`);
+      // Hand control back to the browser so the UI stays responsive (Cancel,
+      // Look up, Random) while a WASM run trains on the main thread.
+      await yieldToBrowser();
     }
     if (trainingCancelRequested || (lastResult && lastResult.cancelled)) {
       setStatus('trainStatus', `Stopped after ${trained}/${iterations} hands.`, 'error');
