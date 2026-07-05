@@ -123,9 +123,9 @@ int StrengthOf(int c, int b0, int b1) {
 
 // Node::GetHash's flushInfo, recomputed from raw card indices.
 int FlushInfoFor(int card, int b0, int b1, int stage) {
-    if (stage == FLOP) return (card % 4 == b0 % 4) ? 1 : 0;
+    if (stage == FLOP) return (card % NUM_SUITS == b0 % NUM_SUITS) ? 1 : 0;
     if (stage == TURN) {
-        bool handSuited = (card % 4 == b0 % 4), boardSuited = (b0 % 4 == b1 % 4);
+        bool handSuited = (card % NUM_SUITS == b0 % NUM_SUITS), boardSuited = (b0 % NUM_SUITS == b1 % NUM_SUITS);
         if (handSuited && !boardSuited) return 1;
         if (handSuited && boardSuited) return 2;
         if (!handSuited && boardSuited) return 3;
@@ -146,8 +146,12 @@ void CFRSolver::BREvalTerminal(Game &g, int br_player, const vector<double> &opp
         int winner = g.bet_states[stage][0] > g.bet_states[stage][1] ? 0 : 1;
         double profit = (double)(g.pot / 2 + g.bet_states[stage][1 - winner]);
         double uBr = (winner == br_player) ? profit : -profit;
-        // Undealt board slots multiply the count of consistent full deals.
-        double mult = (revealed == 0) ? 22.0 * 21.0 : (revealed == 1 ? 21.0 : 1.0);
+        // Undealt board slots multiply the count of consistent full deals:
+        // each draws from the deck minus hole cards and already-dealt board.
+        double mult = 1.0;
+        for (int slot = revealed; slot < NUM_BOARD_CARDS; slot++) {
+            mult *= NUM_CARDS - NUM_PLAYERS - slot;
+        }
         for (int br = 0; br < NUM_CARDS; br++) {
             if (br == b0 || br == b1) continue;
             double sum = 0;
@@ -207,9 +211,9 @@ vector<double> CFRSolver::BRWalk(Game &g, int br_player, const vector<double> &o
         for (int opp = 0; opp < NUM_CARDS; opp++) {
             if (oppReach[opp] == 0 || opp == b0 || opp == b1) continue;
             int fi = FlushInfoFor(opp, b0, b1, stageBefore);
-            int slot = (opp / 4) * 4 + fi;
+            int slot = (opp / NUM_SUITS) * NUM_SUITS + fi;
             if (!strat[slot].empty()) continue;
-            string key = Node::BuildKey(opp / 4, b0 >= 0 ? b0 / 4 : 0, b1 >= 0 ? b1 / 4 : 0,
+            string key = Node::BuildKey(opp / NUM_SUITS, b0 >= 0 ? b0 / NUM_SUITS : 0, b1 >= 0 ? b1 / NUM_SUITS : 0,
                                         fi, stageBefore, g.KeyPot(), g.KeyBet(), g.abstractHistory);
             strat[slot] = GetAverageStrategy(key, acts);
         }
@@ -224,7 +228,7 @@ vector<double> CFRSolver::BRWalk(Game &g, int br_player, const vector<double> &o
         if (actor != br_player) {
             for (int opp = 0; opp < NUM_CARDS; opp++) {
                 if (childReach[opp] == 0) continue;
-                childReach[opp] *= strat[(opp / 4) * 4 + FlushInfoFor(opp, b0, b1, stageBefore)][a];
+                childReach[opp] *= strat[(opp / NUM_SUITS) * NUM_SUITS + FlushInfoFor(opp, b0, b1, stageBefore)][a];
             }
         }
 

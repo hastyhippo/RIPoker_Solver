@@ -4,6 +4,8 @@
 
 #define NUM_CARDS 24
 #define NUM_CARD_VALUES 12
+#define NUM_SUITS 4
+#define NUM_BOARD_CARDS 2
 
 // Not a flat ante - the first player to act (OOP) posts ANTE_FIRST_TO_ACT,
 // the other player (IP) posts ANTE_SECOND_TO_ACT, before any action.
