@@ -14,9 +14,9 @@
 
 // Reduced from the original 6-size grid ({0.33, 0.66, 1, 1.5, 2, 3}) to cut
 // down the branching factor (and resulting infoset explosion) of the game tree.
-vector<double> bet_sizings = {0.5, 1, 2};
+vector<double> bet_sizings = {0.33, 0.75, 1.25};
 vector<double> raise_sizings = {2.2, 2.6, 3, 4};
-vector<string> move_names = {"Check", "Call", "Fold", "Allin", "B50", "B100", "B200", "R2.2", "R2.6", "R3", "R4"};
+vector<string> move_names = {"Check", "Call", "Fold", "Allin", "B33", "B75", "B125", "R2.2", "R2.6", "R3", "R4"};
 
 bool isNumber(const string& s) {
     return !s.empty() && all_of(s.begin(), s.end(), ::isdigit);
@@ -103,12 +103,11 @@ void Game::InitialiseGame(int OOP) {
 
     bet_states = {{0, 0}, {0,0}, {0,0}};
 
-    // Not a flat ante: the first player to act posts ANTE_FIRST_TO_ACT, the
-    // other player posts ANTE_SECOND_TO_ACT.
+    // Antes are modelled as live preflop bets rather than dead money     
     effective_stack[OOP] -= ANTE_FIRST_TO_ACT;
-    pot += ANTE_FIRST_TO_ACT;
+    bet_states[PREFLOP][OOP] = ANTE_FIRST_TO_ACT;
     effective_stack[1 - OOP] -= ANTE_SECOND_TO_ACT;
-    pot += ANTE_SECOND_TO_ACT;
+    bet_states[PREFLOP][1 - OOP] = ANTE_SECOND_TO_ACT;
 
     first_to_act = OOP;
     player = first_to_act;
@@ -236,8 +235,8 @@ void Game::MakeMove(int move_type) {
         stage++;
         update_stage = true;
 
-        // If either play is allin, then the node is terminal
-        if (effective_stack[0] == 0 && effective_stack[1] == 0) {
+        // If either player is all-in, no further betting is possible
+        if (effective_stack[0] == 0 || effective_stack[1] == 0) {
             terminal = true;
         }
     } else if (move_type == ALLIN) {

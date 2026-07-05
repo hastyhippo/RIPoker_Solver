@@ -26,9 +26,9 @@ namespace {
 
     // Human label for a raw move_names entry (kept as-is since it's a stable key).
     string DisplayLabel(const string &moveName) {
-        if (moveName == "B50") return "Bet 50%";
-        if (moveName == "B100") return "Bet 100%";
-        if (moveName == "B200") return "Bet 200%";
+        if (moveName == "B33") return "Bet 33%";
+        if (moveName == "B75") return "Bet 75%";
+        if (moveName == "B125") return "Bet 125%";
         if (moveName == "R2.2") return "Raise 2.2x";
         if (moveName == "R2.6") return "Raise 2.6x";
         if (moveName == "R3") return "Raise 3x";

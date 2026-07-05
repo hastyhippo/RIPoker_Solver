@@ -66,10 +66,12 @@ body {
 /* ------- App shell: fixed viewport, vertical stack ------- */
 #app {
   height: 100vh;
+  max-width: 920px;
+  margin: 0 auto;
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 12px;
+  padding: 12px 12px 0;
 }
 
 /* ------- Top banner ------- */
@@ -225,6 +227,18 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   max-width: 260px;
 }
 .status:empty { display: none; }
+
+/* Inside the banner groups the status shares a wrapping flex row with the
+   inputs/buttons. Give it its own full-width line and let it shrink so long
+   "Done…"/"Saved…" messages truncate with an ellipsis instead of pushing the
+   banner wider or spilling past its edge. */
+.banner-group .status,
+.bubble-body .status {
+  flex: 1 1 100%;
+  min-width: 0;
+  max-width: 100%;
+  align-self: flex-start;
+}
 .status.error { color: var(--status-error); }
 .status.ok { color: var(--status-ok); }
 

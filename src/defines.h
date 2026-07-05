@@ -38,5 +38,5 @@
 
 #define STARTING_STACK 10
 
-// Action indices: 0-3 Check/Call/Fold/Allin, then NUM_BETS bets (B50/B100/B200),
+// Action indices: 0-3 Check/Call/Fold/Allin, then NUM_BETS bets (B33/B75/B125),
 // then NUM_RAISES raises (R2.2/R2.6/R3/R4). See move_names in game.cpp.
