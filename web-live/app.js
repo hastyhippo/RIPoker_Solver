@@ -154,6 +154,38 @@ async function loadActionConfig() {
 
 const STAGE_NAMES = ['Preflop', 'Flop', 'Turn'];
 const RANK_LABELS = ['2', '3', '4', '5', '6', '7'];
+const PREFLOP = 0, FLOP = 1, TURN = 2; // stage indices (match defines.h)
+
+// Suit index -> icon + class, matching card.cpp's suitNames order (0 Spades,
+// 1 Clubs, 2 Diamonds, 3 Hearts). Four-colour deck: spades black, clubs green,
+// diamonds blue, hearts red (see style.css).
+const SUIT_ICONS = ['♠', '♣', '♦', '♥'];
+const SUIT_CLASS = ['suit-spade', 'suit-club', 'suit-diamond', 'suit-heart'];
+function suitHTML(suitIdx) {
+  return `<span class="suit ${SUIT_CLASS[suitIdx]}">${SUIT_ICONS[suitIdx]}</span>`;
+}
+
+// The infoset the solver uses is suit-agnostic except for flush relationships,
+// captured by flushInfo. Given concrete board suits, this maps a hand's suit to
+// its flushInfo - mirroring Node::GetHash / FlushInfoFor in the C++ - so the
+// frontend can show real cards and pick the matching trained strategy.
+function flushInfoFor(handSuit, b0Suit, b1Suit, stage) {
+  if (stage < 1) return 0;                              // preflop: no board
+  if (stage === 1) return handSuit === b0Suit ? 1 : 0; // flop
+  const handSuited = handSuit === b0Suit;              // turn
+  const boardSuited = b0Suit === b1Suit;
+  if (handSuited && !boardSuited) return 1;
+  if (handSuited && boardSuited) return 2;
+  if (!handSuited && boardSuited) return 3;
+  return 0;
+}
+
+function boardSuits() {
+  return {
+    b0: parseInt(document.getElementById('board0suit').value, 10) || 0,
+    b1: parseInt(document.getElementById('board1suit').value, 10) || 0,
+  };
+}
 
 function setStatus(id, text, kind) {
   const el = document.getElementById(id);
@@ -161,19 +193,21 @@ function setStatus(id, text, kind) {
   el.className = 'status' + (kind ? ' ' + kind : '');
 }
 
-function renderBar(strategy) {
+// scale (0..1) sets how much of the lane the bar fills - used to show how often
+// this hand reaches the infoset. Segments still sum to 100% of the bar itself.
+function renderBar(strategy, scale = 1) {
   const byAction = new Map(strategy.map((s) => [s.action, s.prob]));
   const sizeByAction = new Map(strategy.map((s) => [s.action, s.size]));
-  let html = '<div class="bar">';
+  let segs = '';
   for (const action of ACTION_ORDER) {
     const prob = byAction.get(action);
     if (!prob || prob <= 0.001) continue;
     const pct = (prob * 100).toFixed(1);
     const label = actionLabel(action, sizeByAction.get(action));
-    html += `<div class="seg" style="width:${pct}%;background:${actionColor(action, currentActionSizes)}" data-tip="${label}: ${pct}%"></div>`;
+    segs += `<div class="seg" style="width:${pct}%;background:${actionColor(action, currentActionSizes)}" data-tip="${label}: ${pct}%"></div>`;
   }
-  html += '</div>';
-  return html;
+  const w = Math.max(0, Math.min(100, scale * 100));
+  return `<div class="bar-track"><div class="bar" style="width:${w}%">${segs}</div></div>`;
 }
 
 function buildLegend() {
@@ -189,30 +223,48 @@ function buildLegend() {
 // The action tree: one block of legal moves per decision (chosen one filled),
 // vertical dividers between steps, card chips at reveals, live node outlined.
 function renderTrail(trail) {
+  const { b0, b1 } = boardSuits();
+  let revealIdx = 0;
   let html = '<div class="trail">';
   trail.forEach((step, idx) => {
     if (idx > 0) html += '<div class="trail-divider"></div>';
     if (step.type === 'card') {
-      html += `<div class="trail-card">Card: ${step.card ?? '?'}</div>`;
+      const suit = revealIdx === 0 ? b0 : b1; // first reveal = flop, second = turn
+      revealIdx++;
+      const go = step.goto != null ? ` data-goto="${step.goto}"` : '';
+      html += `<div class="trail-card clickable"${go} title="Go to this street">`;
+      html += `<div class="trail-card-line">Card: ${step.card ?? '?'} ${suitHTML(suit)}</div>`;
+      html += `<div class="trail-card-pot">Pot: ${step.pot ?? '?'}</div>`;
+      html += '</div>';
       return;
     }
     const isCurrent = step.chosen === null;
-    html += `<div class="trail-block${isCurrent ? ' current' : ''}" title="Player ${step.player} ${isCurrent ? '(to act)' : 'acted'}">`;
+    html += `<div class="trail-block${isCurrent ? ' current' : ''}">`;
+    html += `<div class="trail-node-head">Player ${step.player}: ${step.stack}</div>`;
+    html += '<div class="trail-moves">';
     for (const a of step.actions) {
       const cls = step.chosen === a.action ? ' chosen' : '';
-      html += `<div class="trail-move${cls}">${actionLabel(a.action, a.size)}</div>`;
+      const go = a.goto != null ? ` data-goto="${a.goto}"` : '';
+      html += `<div class="trail-move clickable${cls}"${go} title="Go to this line">${actionLabel(a.action, a.size)}</div>`;
     }
-    html += '</div>';
+    html += '</div></div>';
   });
   html += '</div>';
   return html;
 }
 
+// Last position rendered, so changing a board suit re-renders without a refetch
+// (all flush variants are already present in pos.rows).
+let lastRenderedPos = null;
+
 function renderPosition(pos) {
+  lastRenderedPos = pos;
   currentActionSizes = collectActionSizes(pos);
   currentPresent = collectPresentActions(pos);
 
-  const moneyLabel = `Pot: ${pos.pot} &middot; To call: ${pos.bet}`;
+  // Pot shown "before the bet" - the committed pot the current bet sizes against.
+  const potShown = pos.potBefore ?? pos.pot;
+  const moneyLabel = `Pot: ${potShown} &middot; To call: ${pos.bet}`;
   let html = '';
   html += `<div class="position-meta"><b>${STAGE_NAMES[pos.stage] || '?'}</b> &middot; ${moneyLabel} &middot; total visits: ${pos.visits}</div>`;
   if (pos.trail) {
@@ -227,19 +279,70 @@ function renderPosition(pos) {
   if (pos.rows.length === 0) {
     html += '<div class="null-strategy">No trained data for this position.</div>';
   } else {
-    // One row per (card, flush category). Preflop has a single row per card;
-    // flop+ splits each card into flush-draw / no-flush-draw variants.
+    // The solver stores one strategy per (rank, flushInfo). Using the chosen
+    // board suits, map each concrete hand suit to its flushInfo and group the
+    // suits that share an infoset - so a card shows as "2 ♣ ♦ ♥" (all its
+    // no-flush suits) with that infoset's strategy, real flushes inferred from
+    // the board. Suits that would collide with a board card are dropped.
+    const { b0, b1 } = boardSuits();
+    const byRank = {};
+    for (const row of pos.rows) (byRank[row.rank] ??= {})[row.flush] = row;
+
+    const boardCards = [];
+    if (pos.stage >= FLOP && pos.board[0]) boardCards.push({ rank: pos.board[0], suit: b0 });
+    if (pos.stage >= TURN && pos.board[1]) boardCards.push({ rank: pos.board[1], suit: b1 });
+
+    // Pass 1: collect the (rank, suit-group, row) entries that will render.
+    const displayed = [];
+    for (const rank of RANK_LABELS) {
+      const flushRows = byRank[rank];
+      if (!flushRows) continue;
+      const groups = new Map(); // flushInfo -> [suit indices]
+      for (let suit = 0; suit < 4; suit++) {
+        if (boardCards.some((bc) => bc.rank === rank && bc.suit === suit)) continue;
+        const fi = flushInfoFor(suit, b0, b1, pos.stage);
+        if (!(fi in flushRows)) continue; // no trained data for that infoset
+        if (!groups.has(fi)) groups.set(fi, []);
+        groups.get(fi).push(suit);
+      }
+      for (const [fi, suits] of groups) displayed.push({ rank, suits, row: flushRows[fi] });
+    }
+
+    // Visit counts are how often each hand reaches this infoset. Bars scale to
+    // the most-frequent hand; the % is the hand's share of the whole range.
+    const maxV = Math.max(1, ...displayed.map((d) => d.row.visits));
+    const totV = Math.max(1, displayed.reduce((a, d) => a + d.row.visits, 0));
+
+    // Pass 2: render each hand row (bar scaled by its reach frequency).
     let prevRank = null;
-    for (const row of pos.rows) {
-      const groupSep = prevRank !== null && row.rank !== prevRank ? ' rank-start' : '';
-      prevRank = row.rank;
-      html += `<div class="hand-row${groupSep}">`;
-      html += `<div class="rank">${row.rank}</div>`;
-      html += `<div class="flush-tag">${row.flushLabel ?? ''}</div>`;
-      html += renderBar(row.strategy);
-      html += `<div class="visits">${row.visits} visits</div>`;
+    for (const d of displayed) {
+      const sep = prevRank !== null && d.rank !== prevRank ? ' rank-start' : '';
+      prevRank = d.rank;
+      const freq = d.row.visits / totV;
+      const title = `${d.row.flushLabel || ''} · ${d.row.visits} visits`;
+      html += `<div class="hand-row${sep}" title="${title.trim()}">`;
+      html += `<div class="rank">${d.rank}</div>`;
+      html += `<div class="suits">${d.suits.map(suitHTML).join(' ')}</div>`;
+      html += renderBar(d.row.strategy, d.row.visits / maxV);
+      html += `<div class="visits">${(freq * 100).toFixed(1)}%</div>`;
       html += '</div>';
     }
+
+    // Aggregate = each hand's strategy weighted by its reach frequency: the
+    // range's overall action distribution at this infoset. Full-width bar.
+    const agg = {};
+    for (const d of displayed) {
+      for (const s of d.row.strategy) agg[s.action] = (agg[s.action] || 0) + d.row.visits * s.prob;
+    }
+    const aggStrategy = ACTION_ORDER
+      .filter((a) => agg[a] !== undefined)
+      .map((a) => ({ action: a, prob: agg[a] / totV, size: currentActionSizes[a] }));
+    html += '<div class="hand-row agg-row" title="Range aggregate: strategy weighted by hand frequency">';
+    html += '<div class="rank">All</div>';
+    html += '<div class="suits agg-label">weighted</div>';
+    html += renderBar(aggStrategy, 1);
+    html += '<div class="visits">100%</div>';
+    html += '</div>';
   }
 
   document.getElementById('results').innerHTML = html;
@@ -363,7 +466,6 @@ document.getElementById('saveStacksBtn').addEventListener('click', async () => {
 
   // Both players get the same stack (single effective-stack knob).
   const stack = parseInt(document.getElementById('stack').value, 10);
-  setStatus('stacksStatus', 'Saving…');
   try {
     await postConfigure(stack, stack);
     document.getElementById('history').value = '';
@@ -384,7 +486,6 @@ document.getElementById('trainBtn').addEventListener('click', () => {
 });
 
 document.getElementById('lookupBtn').addEventListener('click', async () => {
-  setStatus('positionStatus', 'Looking up…');
   try {
     await refreshCurrentPosition();
     setStatus('positionStatus', '');
@@ -393,8 +494,28 @@ document.getElementById('lookupBtn').addEventListener('click', async () => {
   }
 });
 
+// Changing a board suit only re-maps hand suits to infosets - re-render the
+// cached position, no refetch (every flush variant is already in pos.rows).
+['board0suit', 'board1suit'].forEach((id) => {
+  document.getElementById(id).addEventListener('change', () => {
+    if (lastRenderedPos) renderPosition(lastRenderedPos);
+  });
+});
+
+// Click any move (or card) in the trail to navigate to that game state - each
+// carries the history that reaches it (data-goto); board ranks/suits are kept.
+document.getElementById('results').addEventListener('click', async (ev) => {
+  const el = ev.target.closest('[data-goto]');
+  if (!el) return;
+  document.getElementById('history').value = el.getAttribute('data-goto');
+  try {
+    await refreshCurrentPosition();
+  } catch (e) {
+    setStatus('positionStatus', 'Navigation failed: ' + e, 'error');
+  }
+});
+
 document.getElementById('randomBtn').addEventListener('click', async () => {
-  setStatus('positionStatus', 'Picking a random position…');
   try {
     const pos = await fetchRandomPosition();
     document.getElementById('history').value = pos.history;

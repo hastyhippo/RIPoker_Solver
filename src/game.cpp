@@ -405,6 +405,7 @@ TrailStep DecisionStepFor(Game &g) {
     s.isReveal = false;
     s.revealSlot = -1;
     s.player = g.player;
+    s.stack = g.effective_stack[g.player];
     s.chosen = -1;
     vector<bool> acts = g.GetActions(false);
     int facing = g.bet_states[g.stage][1 - g.player];
@@ -416,6 +417,11 @@ TrailStep DecisionStepFor(Game &g) {
         else if (m >= MISC_ACTIONS + NUM_BETS) size = (int)(raise_sizings[m - (MISC_ACTIONS + NUM_BETS)] * facing);
         s.legal.push_back(m);
         s.chipSize.push_back(size);
+        // Play the move on a scratch copy to capture the history it leads to,
+        // so the frontend can navigate there on click.
+        g.MakeMove(m);
+        s.gotoHistory.push_back(g.abstractHistory);
+        g.UnmakeMove();
     }
     return s;
 }
@@ -460,6 +466,8 @@ vector<TrailStep> Game::BuildTrail(int stack0, int stack1, const string &history
             reveal.revealSlot = g.stage - 1;
             reveal.player = -1;
             reveal.chosen = -1;
+            reveal.pot = g.pot;                 // committed pot entering the new street
+            reveal.history = g.abstractHistory; // click a card -> start of that street
             trail.push_back(reveal);
         }
     }

@@ -17,14 +17,20 @@ extern vector<double> raise_sizings;
 extern vector<string> move_names;
 
 // One step of a replayed position: a decision point (legal moves, resolved
-// chip sizes, which was taken) or a board-card reveal between streets.
+// chip sizes, which was taken) or a board-card reveal between streets. Each
+// step stores the history that reaches it so the frontend can navigate the
+// tree by clicking (see gotoHistory / history).
 struct TrailStep {
     bool isReveal;        // true = board reveal, false = decision point
     int revealSlot;       // 0 = flop card, 1 = turn card (reveals only)
     int player;           // acting player at a decision
+    int stack = 0;        // acting player's remaining stack at a decision
     int chosen;           // move_type taken; -1 at the live (last) decision
+    int pot = 0;          // reveal: committed pot entering the new street
+    string history;       // reveal: history just after the card is dealt
     vector<int> legal;    // legal move_type indices at this point
     vector<int> chipSize; // chips per legal entry; -1 when not applicable
+    vector<string> gotoHistory; // history reached by playing each legal move
 };
 
 // One moveHistory entry, exactly what UnmakeMove needs. Chips covers

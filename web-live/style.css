@@ -82,7 +82,7 @@ body {
   background: var(--surface-1);
   border: 1px solid var(--border);
   border-radius: 12px;
-  padding: 10px 16px;
+  padding: 6px 16px;
   flex: 0 0 auto;
 }
 
@@ -118,11 +118,12 @@ body {
 .banner-group:last-child { border-right: none; padding-right: 0; }
 
 .group-label {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--text-muted);
+  margin-bottom: 2px;
 }
 .group-body {
   display: flex;
@@ -131,21 +132,36 @@ body {
   gap: 8px;
 }
 
+/* Progress bar + training status always share one line (below the controls). */
+.train-report {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 100%;
+  min-width: 0;
+}
+.banner-group .train-report .status {
+  flex: 1 1 auto;
+  min-width: 0;
+  align-self: center;
+}
+.train-report .progress-track { align-self: center; }
+
 /* ------- Position bubble ------- */
 .position-bubble {
   background: var(--surface-1);
   border: 1px solid var(--border);
   border-radius: 12px;
-  padding: 10px 16px;
+  padding: 6px 16px;
   flex: 0 0 auto;
 }
 .bubble-title {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--text-muted);
-  margin-bottom: 6px;
+  margin-bottom: 3px;
 }
 .bubble-body {
   display: flex;
@@ -222,6 +238,19 @@ label.field input {
   width: 90px;
 }
 label.field input.wide { width: 160px; }
+
+/* Board card = rank input + a compact suit dropdown side by side */
+.card-input { display: flex; gap: 4px; align-items: stretch; }
+.card-input input { width: 44px; }
+.suit-select {
+  font: inherit;
+  font-size: 15px;
+  padding: 0 2px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--page);
+  color: var(--text-primary);
+}
 
 button.primary, button.secondary {
   font: inherit;
@@ -311,7 +340,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 /* ------- Action trail (visual line history) ------- */
 .trail {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   margin: 4px 0 12px;
   overflow-x: auto;
@@ -325,6 +354,15 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   border: 1px solid var(--border);
   border-radius: 8px;
   flex: 0 0 auto;
+}
+.trail-moves { display: flex; flex-direction: column; }
+/* "Player N: stack" label above each decision node. */
+.trail-node-head {
+  font-size: 10px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  margin-bottom: 2px;
+  padding: 0 2px;
 }
 /* The live decision the strategy table is showing */
 .trail-block.current {
@@ -343,6 +381,11 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   background: var(--accent);
   color: #fff;
 }
+/* Clickable trail entries navigate to that game state. */
+.clickable { cursor: pointer; }
+.trail-move.clickable:hover { background: var(--gridline); }
+.trail-move.chosen.clickable:hover { filter: brightness(1.1); }
+.trail-card.clickable:hover { border-color: var(--accent); }
 .trail-divider {
   width: 1px;
   align-self: stretch;
@@ -358,30 +401,57 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   padding: 4px 8px;
   white-space: nowrap;
   flex: 0 0 auto;
+  text-align: center;
+}
+.trail-card-pot {
+  font-weight: 400;
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 1px;
 }
 
 .hand-row {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 3px 0;
+  padding: 1px 0;
   border-bottom: 1px solid var(--gridline);
 }
 .hand-row:last-child { border-bottom: none; }
 /* A hairline above the first row of each new card groups its flush variants. */
 .hand-row.rank-start { border-top: 1px solid var(--border); }
+/* Range aggregate row - pinned to the bottom of the scrolling strategy list
+   so the overall strategy is always visible. */
+.hand-row.agg-row {
+  position: sticky;
+  bottom: 0;
+  border-top: 2px solid var(--border);
+  background: var(--surface-1);
+  font-weight: 600;
+}
+.hand-row.agg-row .agg-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  font-weight: 600;
+}
 .hand-row .rank {
   width: 20px;
   font-weight: 600;
 }
-.hand-row .flush-tag {
-  width: 96px;
-  font-size: 11px;
-  color: var(--text-muted);
+.hand-row .suits {
+  width: 72px;
+  font-size: 14px;
+  letter-spacing: 1px;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
+/* Four-colour deck. "Black" spades use the theme ink so they stay legible in
+   dark mode (pure black would vanish on the dark surface). */
+.suit-spade   { color: var(--text-primary); }
+.suit-club    { color: #2fa85a; }
+.suit-diamond { color: #4a90e2; }
+.suit-heart   { color: #e05a5a; }
 .hand-row .visits {
   width: 70px;
   text-align: right;
@@ -394,21 +464,24 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   font-style: italic;
 }
 
-.bar {
-  display: flex;
-  height: 18px;
-  border-radius: 4px;
-  overflow: hidden;
-  background: var(--gridline);
+/* Full-width lane; the bar fills a fraction of it by reach frequency. */
+.bar-track {
   flex: 1;
   min-width: 160px;
+  height: 13px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--gridline);
+}
+.bar {
+  display: flex;
+  height: 100%;
+  /* width set inline (0-100%) = how often this hand reaches the infoset */
 }
 .bar .seg {
   height: 100%;
   position: relative;
-  border-right: 2px solid var(--surface-1);
 }
-.bar .seg:last-child { border-right: none; }
 .bar .seg:hover::after {
   content: attr(data-tip);
   position: absolute;

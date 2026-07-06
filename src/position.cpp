@@ -66,8 +66,9 @@ string BuildJSON(CFRSolver &cfr, int stage, int board0Val, int board1Val, const 
 
     bool replayOk = false;
     Game replayed = Game::ReplayExactHistory(cfr.stack0, cfr.stack1, history, replayOk);
-    int pot = replayOk ? replayed.KeyPot() : 0;
+    int pot = replayOk ? replayed.KeyPot() : 0;   // total chips in play (infoset key)
     int bet = replayOk ? replayed.KeyBet() : 0;
+    int potBefore = replayOk ? replayed.pot : 0;  // committed pot before this street's bets
 
     // Chip amount per offered bet/raise/all-in (same bases MakeMove uses).
     unordered_map<string, int> actionChipSize;
@@ -111,7 +112,8 @@ string BuildJSON(CFRSolver &cfr, int stage, int board0Val, int board1Val, const 
     if (stage >= FLOP) WriteJSONString(out, RankName(board0Val)); else out << "null";
     out << ", ";
     if (stage >= TURN) WriteJSONString(out, RankName(board1Val)); else out << "null";
-    out << "],\n  \"pot\": " << pot << ",\n  \"bet\": " << bet << ",\n  \"history\": ";
+    out << "],\n  \"pot\": " << pot << ",\n  \"potBefore\": " << potBefore
+        << ",\n  \"bet\": " << bet << ",\n  \"history\": ";
     WriteJSONString(out, history);
 
     out << ",\n  \"trail\": ";
@@ -124,9 +126,12 @@ string BuildJSON(CFRSolver &cfr, int stage, int board0Val, int board1Val, const 
             if (s.isReveal) {
                 out << "{\"type\": \"card\", \"card\": ";
                 WriteJSONString(out, RankName(s.revealSlot == 0 ? board0Val : board1Val));
+                out << ", \"pot\": " << s.pot << ", \"goto\": ";
+                WriteJSONString(out, s.history);
                 out << "}";
             } else {
-                out << "{\"type\": \"decision\", \"player\": " << s.player << ", \"chosen\": ";
+                out << "{\"type\": \"decision\", \"player\": " << s.player
+                    << ", \"stack\": " << s.stack << ", \"chosen\": ";
                 if (s.chosen < 0) out << "null";
                 else WriteJSONString(out, move_names[s.chosen]);
                 out << ", \"actions\": [";
@@ -134,6 +139,8 @@ string BuildJSON(CFRSolver &cfr, int stage, int board0Val, int board1Val, const 
                     out << "{\"action\": ";
                     WriteJSONString(out, move_names[s.legal[j]]);
                     if (s.chipSize[j] >= 0) out << ", \"size\": " << s.chipSize[j];
+                    out << ", \"goto\": ";
+                    WriteJSONString(out, s.gotoHistory[j]);
                     out << "}";
                     if (j + 1 < s.legal.size()) out << ", ";
                 }

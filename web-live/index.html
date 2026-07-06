@@ -34,10 +34,12 @@
         </label>
         <button class="primary" id="trainBtn">Run</button>
         <button class="secondary" id="cancelTrainBtn" disabled>Cancel</button>
-        <div class="progress-track" id="trainProgressTrack" style="display:none;">
-          <div class="progress-fill" id="trainProgressFill"></div>
+        <div class="train-report">
+          <div class="progress-track" id="trainProgressTrack" style="display:none;">
+            <div class="progress-fill" id="trainProgressFill"></div>
+          </div>
+          <div class="status" id="trainStatus"></div>
         </div>
-        <div class="status" id="trainStatus"></div>
       </div>
     </div>
   </header>
@@ -50,10 +52,26 @@
         <input type="text" id="history" class="wide" placeholder="e.g. 07AA,5">
       </label>
       <label class="field">Board 1 (flop)
-        <input type="text" id="board0" placeholder="4" maxlength="1">
+        <span class="card-input">
+          <input type="text" id="board0" placeholder="4" maxlength="1">
+          <select id="board0suit" class="suit-select">
+            <option value="0">&#9824;</option>
+            <option value="1">&#9827;</option>
+            <option value="2">&#9830;</option>
+            <option value="3">&#9829;</option>
+          </select>
+        </span>
       </label>
       <label class="field">Board 2 (turn)
-        <input type="text" id="board1" placeholder="6" maxlength="1">
+        <span class="card-input">
+          <input type="text" id="board1" placeholder="6" maxlength="1">
+          <select id="board1suit" class="suit-select">
+            <option value="0">&#9824;</option>
+            <option value="1">&#9827;</option>
+            <option value="2" selected>&#9830;</option>
+            <option value="3">&#9829;</option>
+          </select>
+        </span>
       </label>
       <button class="secondary" id="lookupBtn">Look up</button>
       <button class="secondary" id="randomBtn">Random</button>
@@ -63,7 +81,7 @@
 
   <!-- Strategy fills the middle-to-bottom of the screen -->
   <section class="strategy-panel" id="resultsPanel">
-    <div id="results">Loading…</div>
+    <div id="results"></div>
   </section>
 
   <!-- Exploitability convergence: one point per 1,000 trained hands -->
