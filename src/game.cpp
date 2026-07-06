@@ -443,6 +443,33 @@ Game Game::ReplayExactHistory(int stack0, int stack1, const string &history, boo
     return g;
 }
 
+vector<DecisionRecord> Game::ReplayDecisions(int stack0, int stack1, const string &history, bool &ok) {
+    Game g(stack0, stack1);
+    g.InitialiseGame(0);
+    ok = true;
+    vector<DecisionRecord> recs;
+
+    size_t i = 0;
+    while (i < history.size() && ok && !g.terminal) {
+        if (history[i] == ',') { i++; continue; }
+        DecisionRecord r;
+        r.player = g.player;
+        r.stage = g.stage;
+        r.pot = g.KeyPot();
+        r.bet = g.KeyBet();
+        r.history = g.abstractHistory;
+        vector<bool> acts = g.GetActions(false);
+        r.legalCount = 0;
+        for (bool b : acts) if (b) r.legalCount++;
+        int move_type = DecodeToken(g, history, i, ok);
+        if (!ok) break;
+        r.moveType = move_type;
+        recs.push_back(r);
+        g.MakeMove(move_type);
+    }
+    return recs;
+}
+
 vector<TrailStep> Game::BuildTrail(int stack0, int stack1, const string &history, bool &ok) {
     Game g(stack0, stack1);
     g.InitialiseGame(0);

@@ -29,6 +29,7 @@ struct Row {
     int handVal;
     int flushInfo;
     int visits;
+    double reach; // chance the acting player reaches this node with this hand
     Node *node;
 };
 
@@ -84,6 +85,44 @@ string BuildJSON(CFRSolver &cfr, int stage, int board0Val, int board1Val, const 
         actionChipSize["Allin"] = replayed.effective_stack[replayed.player];
     }
 
+    // The acting player's decisions down this line - used to compute how often
+    // each hand reaches this node (product of that player's strategy probs).
+    bool decOk = false;
+    vector<DecisionRecord> decisions = replayOk
+        ? Game::ReplayDecisions(cfr.stack0, cfr.stack1, history, decOk)
+        : vector<DecisionRecord>{};
+    int actingPlayer = replayOk ? replayed.player : 0;
+
+    // A hand's flushInfo at an earlier street, derived from its category here:
+    // preflop none; flop only cares whether it matches the flop card's suit.
+    auto flushAtStreet = [&](int currentFlush, int decStage) -> int {
+        if (decStage == PREFLOP) return 0;
+        if (decStage >= stage) return currentFlush; // same street as this node
+        bool matchesBoard0 = (stage == FLOP) ? (currentFlush == 1)
+                                             : (currentFlush == 1 || currentFlush == 2);
+        return matchesBoard0 ? 1 : 0; // decStage == FLOP
+    };
+
+    // reach with hand (handVal, flushInfo) = product over the acting player's
+    // decisions of its avg-strategy probability for the move it made (untrained
+    // ancestors fall back to uniform over that node's legal actions).
+    auto reachFor = [&](int handVal, int flushInfo) -> double {
+        double reach = 1.0;
+        for (const DecisionRecord &d : decisions) {
+            if (d.player != actingPlayer) continue;
+            int fi = flushAtStreet(flushInfo, d.stage);
+            string key = Node::BuildKey(handVal, board0Val, board1Val, fi, d.stage, d.pot, d.bet, d.history);
+            auto it = cfr.positionMap.find(key);
+            if (it != cfr.positionMap.end()) {
+                vector<double> strat = it->second.GetFinalStrategy(it->second.possible_actions);
+                reach *= strat[d.moveType];
+            } else if (d.legalCount > 0) {
+                reach *= 1.0 / d.legalCount;
+            }
+        }
+        return reach;
+    };
+
     // One row per (hand value, present flush category) - preflop has just the
     // single flush=0 slot, flop+ splits flush-draw from no-flush-draw, etc.
     vector<Row> rows;
@@ -95,7 +134,7 @@ string BuildJSON(CFRSolver &cfr, int stage, int board0Val, int board1Val, const 
                 string key = Node::BuildKey(handVal, board0Val, board1Val, flushInfo, stage, pot, bet, history);
                 auto it = cfr.positionMap.find(key);
                 if (it == cfr.positionMap.end()) continue;
-                rows.push_back({handVal, flushInfo, it->second.visits, &it->second});
+                rows.push_back({handVal, flushInfo, it->second.visits, reachFor(handVal, flushInfo), &it->second});
                 totalVisits += it->second.visits;
             }
         }
@@ -162,7 +201,7 @@ string BuildJSON(CFRSolver &cfr, int stage, int board0Val, int board1Val, const 
             out << ", \"flushLabel\": ";
             WriteJSONString(out, FlushLabel(stage, row.flushInfo));
         }
-        out << ", \"visits\": " << row.visits << ", \"strategy\": [";
+        out << ", \"visits\": " << row.visits << ", \"reach\": " << row.reach << ", \"strategy\": [";
         bool first = true;
         for (int i = 0; i < NUM_ACTIONS; i++) {
             if (!row.node->possible_actions[i]) continue;

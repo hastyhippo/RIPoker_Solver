@@ -309,7 +309,8 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   height: 100%;
   width: 0%;
   background: var(--accent);
-  transition: width 0.15s ease;
+  /* No transition: width jumps directly to each value. A transition animates
+     the reset-to-0 on a new run as a slow "tick down". */
 }
 
 /* ------- Strategy content ------- */

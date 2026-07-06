@@ -33,6 +33,19 @@ struct TrailStep {
     vector<string> gotoHistory; // history reached by playing each legal move
 };
 
+// One decision along a replayed line: who acted, the infoset-key ingredients at
+// that node, and which move they took. Used to compute per-hand reach (the
+// product of the acting player's strategy probabilities down the line).
+struct DecisionRecord {
+    int player;
+    int stage;
+    int pot;        // KeyPot at the decision (infoset key)
+    int bet;        // KeyBet at the decision
+    int moveType;   // action taken
+    int legalCount; // legal actions here (for the untrained-ancestor fallback)
+    string history; // abstractHistory before the move
+};
+
 // One moveHistory entry, exactly what UnmakeMove needs. Chips covers
 // check/call/bet/raise/all-in; StreetClose marks the pot bump + stage++.
 struct Move {
@@ -88,4 +101,7 @@ class Game {
         // Replays a history into a step-by-step trail (decisions + reveals);
         // the last step is the live decision point (chosen = -1).
         static vector<TrailStep> BuildTrail(int stack0, int stack1, const string &history, bool &ok);
+
+        // Replays a history into the list of decisions taken (for reach calc).
+        static vector<DecisionRecord> ReplayDecisions(int stack0, int stack1, const string &history, bool &ok);
 };

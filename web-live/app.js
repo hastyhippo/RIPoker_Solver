@@ -308,40 +308,41 @@ function renderPosition(pos) {
       for (const [fi, suits] of groups) displayed.push({ rank, suits, row: flushRows[fi] });
     }
 
-    // Visit counts are how often each hand reaches this infoset. Bars scale to
-    // the most-frequent hand; the % is the hand's share of the whole range.
-    const maxV = Math.max(1, ...displayed.map((d) => d.row.visits));
-    const totV = Math.max(1, displayed.reduce((a, d) => a + d.row.visits, 0));
-
-    // Pass 2: render each hand row (bar scaled by its reach frequency).
+    // Pass 2: render each hand row. reach = chance the player arrives at this
+    // node with that hand (product of its strategy probs down the line); the
+    // bar fills that fraction of the lane and the % shows it directly.
     let prevRank = null;
     for (const d of displayed) {
       const sep = prevRank !== null && d.rank !== prevRank ? ' rank-start' : '';
       prevRank = d.rank;
-      const freq = d.row.visits / totV;
-      const title = `${d.row.flushLabel || ''} · ${d.row.visits} visits`;
+      const reach = d.row.reach ?? 0;
+      const title = `${d.row.flushLabel || ''} · reach ${(reach * 100).toFixed(1)}%`;
       html += `<div class="hand-row${sep}" title="${title.trim()}">`;
       html += `<div class="rank">${d.rank}</div>`;
       html += `<div class="suits">${d.suits.map(suitHTML).join(' ')}</div>`;
-      html += renderBar(d.row.strategy, d.row.visits / maxV);
-      html += `<div class="visits">${(freq * 100).toFixed(1)}%</div>`;
+      html += renderBar(d.row.strategy, reach);
+      html += `<div class="visits">${(reach * 100).toFixed(1)}%</div>`;
       html += '</div>';
     }
 
-    // Aggregate = each hand's strategy weighted by its reach frequency: the
-    // range's overall action distribution at this infoset. Full-width bar.
+    // Aggregate = each hand's strategy weighted by how much of the range it is:
+    // its reach times how many concrete suits map to it. The range's overall
+    // action distribution at this node. Full-width bar.
     const agg = {};
+    let wsum = 0;
     for (const d of displayed) {
-      for (const s of d.row.strategy) agg[s.action] = (agg[s.action] || 0) + d.row.visits * s.prob;
+      const w = (d.row.reach ?? 0) * d.suits.length;
+      wsum += w;
+      for (const s of d.row.strategy) agg[s.action] = (agg[s.action] || 0) + w * s.prob;
     }
     const aggStrategy = ACTION_ORDER
       .filter((a) => agg[a] !== undefined)
-      .map((a) => ({ action: a, prob: agg[a] / totV, size: currentActionSizes[a] }));
-    html += '<div class="hand-row agg-row" title="Range aggregate: strategy weighted by hand frequency">';
+      .map((a) => ({ action: a, prob: wsum > 0 ? agg[a] / wsum : 0, size: currentActionSizes[a] }));
+    html += '<div class="hand-row agg-row" title="Range aggregate: strategy weighted by how often each hand reaches this node">';
     html += '<div class="rank">All</div>';
     html += '<div class="suits agg-label">weighted</div>';
     html += renderBar(aggStrategy, 1);
-    html += '<div class="visits">100%</div>';
+    html += '<div class="visits"></div>';
     html += '</div>';
   }
 
@@ -444,6 +445,7 @@ async function runTraining(iterations) {
     cancelBtn.disabled = true;
     trainingCancelRequested = false;
     currentTrainingPromise = null;
+    track.style.display = 'none'; // no stale bar left for the next operation
   }
 }
 
