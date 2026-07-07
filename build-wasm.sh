@@ -21,17 +21,21 @@ SRCS=(
   src/wasm_api.cpp
 )
 
-# Fixed (non-growable) 768 MB heap. A growable heap is a *resizable*
-# ArrayBuffer, and current Chrome rejects TextDecoder/crypto views over one -
-# a fixed heap sidesteps that entirely. 768 MB fits ~150k+ trained hands at
-# the default stack; heavier training would need a larger INITIAL_MEMORY.
+# Growable heap so deeper effective stacks (which explode the infoset tree)
+# aren't capped by a fixed size. A growable heap is a *resizable* ArrayBuffer,
+# and Chrome rejects TextDecoder/crypto views over one - we work around that by
+# returning results by pointer+length (wasm_api.cpp) instead of std::string,
+# and seeding RNGs off the clock (RandomSeed). HEAPU8 is exported so the
+# frontend can read the result buffer.
 em++ -O3 -std=c++17 -I./src "${SRCS[@]}" \
   --bind \
   -s MODULARIZE=1 \
   -s EXPORT_NAME=createSolverModule \
-  -s INITIAL_MEMORY=805306368 \
+  -s ALLOW_MEMORY_GROWTH=1 \
+  -s INITIAL_MEMORY=268435456 \
+  -s MAXIMUM_MEMORY=2147483648 \
   -s ENVIRONMENT=web \
-  -s EXPORTED_RUNTIME_METHODS='[]' \
+  -s EXPORTED_RUNTIME_METHODS=HEAPU8 \
   -o "${OUT_DIR}/solver.js"
 
 echo "Built ${OUT_DIR}/solver.js + ${OUT_DIR}/solver.wasm"

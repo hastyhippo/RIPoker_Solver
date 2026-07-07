@@ -106,19 +106,29 @@ const ServerBackend = {
   async exploitability() { return (await fetch('/api/exploitability')).json(); },
 };
 
-// Wraps the emscripten module; each wasm* export returns a JSON string.
+// Wraps the emscripten module. Each wasm* export writes its JSON into the
+// module heap and returns the byte length; we read it back via wasmResultPtr()
+// and decode a *copy* (slice) - required because the heap is a growable/
+// resizable ArrayBuffer that TextDecoder refuses to view directly.
 function makeWasmBackend(mod) {
+  const decoder = new TextDecoder();
+  // read(len): decode the result buffer. HEAPU8 is re-read each call because a
+  // heap growth during the call swaps the backing buffer.
+  const read = (len) => {
+    const ptr = mod.wasmResultPtr();
+    return JSON.parse(decoder.decode(mod.HEAPU8.slice(ptr, ptr + len)));
+  };
   return {
     label: 'wasm',
     canTrain: true,
     async init() {},
-    async actions() { return JSON.parse(mod.wasmActions()); },
-    async configure(s0, s1) { return JSON.parse(mod.wasmConfigure(s0, s1)); },
-    async train(iters) { return JSON.parse(mod.wasmTrain(iters)); },
+    async actions() { return read(mod.wasmActions()); },
+    async configure(s0, s1) { return read(mod.wasmConfigure(s0, s1)); },
+    async train(iters) { return read(mod.wasmTrain(iters)); },
     async cancelTrain() { /* chunk loop stops client-side; nothing server-side */ },
-    async position(history, b0, b1) { return JSON.parse(mod.wasmPosition(history || '', b0 || '', b1 || '')); },
-    async randomPosition() { return JSON.parse(mod.wasmRandomPosition()); },
-    async exploitability() { return JSON.parse(mod.wasmExploitability()); },
+    async position(history, b0, b1) { return read(mod.wasmPosition(history || '', b0 || '', b1 || '')); },
+    async randomPosition() { return read(mod.wasmRandomPosition()); },
+    async exploitability() { return read(mod.wasmExploitability()); },
   };
 }
 
@@ -439,7 +449,12 @@ async function runTraining(iterations) {
       setStatus('trainStatus', `Done. Total hands trained: ${lastResult.iteration}, infosets: ${lastResult.infosets}.`, 'ok');
     }
   } catch (e) {
-    setStatus('trainStatus', 'Training failed: ' + e, 'error');
+    // A deep effective stack explodes the infoset tree; past the WASM heap max
+    // the engine aborts and can't recover, so guide the user to reload.
+    const msg = /memory|OOM|Aborted|allocation/i.test(String(e))
+      ? 'Out of memory at this stack depth — lower the effective stack, reload the page, then train again.'
+      : 'Training failed: ' + e;
+    setStatus('trainStatus', msg, 'error');
   } finally {
     btn.disabled = false;
     cancelBtn.disabled = true;

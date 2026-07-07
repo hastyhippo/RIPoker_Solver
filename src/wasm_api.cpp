@@ -50,10 +50,36 @@ void writeJSONString(ostream &out, const string &s) {
 
 } // namespace
 
-// --- Exports (names match the frontend's WasmBackend) ---
+// --- Result marshalling ------------------------------------------------
+// A growable WASM heap is a resizable ArrayBuffer, and Chrome refuses to
+// TextDecoder-decode a view over one - which is how embind returns a
+// std::string. So each export writes its JSON into g_out and returns the
+// byte length; the frontend reads g_out via wasmResultPtr()+length and
+// decodes a COPY (slice), which is a normal non-resizable buffer.
+static string g_out;
+unsigned emitResult(const string &s) { g_out = s; return (unsigned)g_out.size(); }
+unsigned wasmResultPtr() { return (unsigned)(uintptr_t)g_out.data(); }
+
+// The impl_* builders are defined below; forward-declare so the exports can
+// wrap them.
+string impl_actions();
+string impl_configure(int stack0, int stack1);
+string impl_train(int iters);
+string impl_position(string history, string board0, string board1);
+string impl_randomPosition();
+string impl_exploitability();
+
+// --- Exports (names match the frontend's WasmBackend); each returns the
+// byte length of the JSON now sitting at wasmResultPtr(). ---
+unsigned wasmActions() { return emitResult(impl_actions()); }
+unsigned wasmConfigure(int s0, int s1) { return emitResult(impl_configure(s0, s1)); }
+unsigned wasmTrain(int iters) { return emitResult(impl_train(iters)); }
+unsigned wasmPosition(string h, string b0, string b1) { return emitResult(impl_position(h, b0, b1)); }
+unsigned wasmRandomPosition() { return emitResult(impl_randomPosition()); }
+unsigned wasmExploitability() { return emitResult(impl_exploitability()); }
 
 // Action order + human labels, same payload as GET /api/actions.
-string wasmActions() {
+string impl_actions() {
     ostringstream out;
     out << "{\n  \"actionOrder\": [";
     for (size_t i = 0; i < move_names.size(); i++) {
@@ -73,7 +99,7 @@ string wasmActions() {
 }
 
 // Wipe + reconfigure stacks, then seed the untrained exploitability baseline.
-string wasmConfigure(int stack0, int stack1) {
+string impl_configure(int stack0, int stack1) {
     ensureReady();
     g_cfr.Reset(stack0, stack1);
     g_exploit.clear();
@@ -83,7 +109,7 @@ string wasmConfigure(int stack0, int stack1) {
 
 // Train `iters` hands, sampling exploitability every EXPLOIT_EVERY, and return
 // the same status shape as POST /api/train. Called in small chunks by the UI.
-string wasmTrain(int iters) {
+string impl_train(int iters) {
     ensureReady();
     if (g_exploit.empty()) g_exploit.push_back({0, g_cfr.ComputeExploitability(EXPLOIT_MC_CHANCE)});
     int trained = 0;
@@ -101,7 +127,7 @@ string wasmTrain(int iters) {
 }
 
 // Position payload for a (history, board) - identical logic to GET /api/position.
-string wasmPosition(string history, string board0, string board1) {
+string impl_position(string history, string board0, string board1) {
     ensureReady();
     int stage = (int)count(history.begin(), history.end(), ',');
     if (stage > TURN) stage = TURN;
@@ -112,7 +138,7 @@ string wasmPosition(string history, string board0, string board1) {
 }
 
 // A uniformly random trained position (reservoir sampling), like /api/random-position.
-string wasmRandomPosition() {
+string impl_randomPosition() {
     ensureReady();
     if (g_cfr.positionMap.empty()) {
         return Position::BuildJSON(g_cfr, PREFLOP, 0, 0, "");
@@ -129,7 +155,7 @@ string wasmRandomPosition() {
 }
 
 // The exploitability curve, same shape as GET /api/exploitability.
-string wasmExploitability() {
+string impl_exploitability() {
     ostringstream out;
     out << fixed << setprecision(6) << "{\"points\": [";
     for (size_t i = 0; i < g_exploit.size(); i++) {
@@ -147,4 +173,5 @@ EMSCRIPTEN_BINDINGS(solver) {
     emscripten::function("wasmPosition", &wasmPosition);
     emscripten::function("wasmRandomPosition", &wasmRandomPosition);
     emscripten::function("wasmExploitability", &wasmExploitability);
+    emscripten::function("wasmResultPtr", &wasmResultPtr);
 }
