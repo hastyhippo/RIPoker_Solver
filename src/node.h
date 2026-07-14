@@ -29,6 +29,9 @@ class Node {
         vector<double> strategy;
         vector<double> strategy_sum;
         vector<double> regret_sum;
+        // PCFR+ only: last instantaneous (opp-reach-weighted) regret per
+        // action, used as the prediction in the next strategy computation.
+        vector<double> prediction;
         vector<bool> possible_actions;
         int visits = 0; // times the trainer hit this infoset
 
@@ -36,8 +39,11 @@ class Node {
 
         // possible_actions is the CURRENT state's real legality (passed in),
         // never the stored member, which the abstraction may have widened.
-        void UpdateStrategy(const vector<bool> &possible_actions);
-        void UpdateRegret(const vector<double> &new_regret, const vector<bool> &possible_actions, double opp_reach, double own_reach, long long iteration, bool cfrPlus);
+        // variant (CFRVariant) sets the regret rule; weighting (AvgWeighting)
+        // sets the average-strategy weight. Neither may change mid-run
+        // (Reset() first).
+        void UpdateStrategy(const vector<bool> &possible_actions, int variant);
+        void UpdateRegret(const vector<double> &new_regret, const vector<bool> &possible_actions, double opp_reach, double own_reach, long long iteration, int variant, int weighting);
         vector<double> GetFinalStrategy(const vector<bool> &possible_actions);
 
     // History token for a bet/raise: the exact chip amount "[N]"/"{N}".

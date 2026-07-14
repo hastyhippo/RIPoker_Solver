@@ -22,6 +22,12 @@
   --status-error: #e34948;
 
   --accent: #2a78d6;
+
+  /* Exploitability chart: one fixed hue per CFR variant (by variant id, so a
+     line never changes color when others appear). CVD-validated set. */
+  --series-vanilla: #2a78d6;
+  --series-cfrplus: #1baf7a;
+  --series-pcfrplus: #eda100;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -46,6 +52,11 @@
     --status-error: #e66767;
 
     --accent: #3987e5;
+
+    /* Same hues, stepped for the dark surface (not an automatic flip). */
+    --series-vanilla: #3987e5;
+    --series-cfrplus: #199e70;
+    --series-pcfrplus: #c98500;
   }
 }
 
@@ -193,8 +204,24 @@ body {
   padding: 10px 16px 12px;
   flex: 0 0 auto;
 }
-.exploit-panel .panel-title { font-weight: 600; margin-bottom: 6px; }
+.exploit-panel .panel-title {
+  font-weight: 600;
+  margin-bottom: 6px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
 .panel-sub { font-weight: 400; font-size: 11px; color: var(--text-muted); }
+/* Variant legend, right-aligned in the title row (shown for >= 2 lines) */
+.exploit-legend {
+  margin-left: auto;
+  display: flex;
+  gap: 14px;
+  font-weight: 400;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.exploit-legend .line-swatch { vertical-align: -1px; margin-right: 5px; }
 .exploit-chart { position: relative; height: 120px; }
 .exploit-chart svg { display: block; width: 100%; height: 100%; }
 .exploit-empty {
@@ -219,6 +246,26 @@ body {
   display: none;
 }
 .exploit-tip b { color: var(--text-primary); font-size: 12px; }
+/* Sampling-mode toggle row under the chart */
+.exploit-mode {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  width: fit-content;
+  cursor: pointer;
+}
+.exploit-mode input { accent-color: var(--accent); margin: 0; }
+
+.exploit-tip .tip-chip {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  margin-right: 5px;
+}
 
 /* ------- Shared form controls ------- */
 label.field {
@@ -239,13 +286,14 @@ label.field input {
 }
 label.field input.wide { width: 160px; }
 
-/* Compact checkbox variant (e.g. the CFR+ algorithm toggle) */
-label.field.checkbox-field input {
-  width: auto;
-  padding: 0;
-  margin: 0 auto;
-  height: 27px; /* aligns the box with the sibling text inputs */
-  accent-color: var(--accent);
+/* Algorithm variant dropdown, matched to the sibling text inputs */
+select.algo-select {
+  font: inherit;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--page);
+  color: var(--text-primary);
 }
 
 /* Board card = rank input + a compact suit dropdown side by side */
@@ -331,7 +379,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   font-size: 12px;
   color: var(--text-secondary);
 }
-.legend .swatch {
+.legend .swatch, .exploit-legend .swatch {
   display: inline-block;
   width: 10px;
   height: 10px;

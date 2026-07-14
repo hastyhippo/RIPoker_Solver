@@ -11,12 +11,31 @@
 #include "game.h"
 #include "defines.h"
 
-void CFRSolver::Reset(int newStack0, int newStack1, bool cfrPlus) {
+const char *CFRSolver::VariantName(int variant) {
+    switch (variant) {
+        case VARIANT_VANILLA: return "Vanilla CFR";
+        case VARIANT_CFR_PLUS: return "CFR+";
+        case VARIANT_PCFR_PLUS: return "PCFR+";
+    }
+    return "Unknown";
+}
+
+const char *CFRSolver::WeightingName(int weighting) {
+    switch (weighting) {
+        case WEIGHT_UNIFORM: return "uniform";
+        case WEIGHT_LINEAR: return "linear";
+        case WEIGHT_QUADRATIC: return "quadratic";
+    }
+    return "unknown";
+}
+
+void CFRSolver::Reset(int newStack0, int newStack1, int newVariant, int newWeighting) {
     positionMap.clear();
     iteration = 0;
     stack0 = newStack0;
     stack1 = newStack1;
-    useCFRPlus = cfrPlus;
+    variant = newVariant;
+    weighting = newWeighting;
 }
 
 void CFRSolver::TrainCFR() {
@@ -51,7 +70,7 @@ double CFRSolver::CFR(Game &g, double p1, double p2) {
     Node *currentNode = GetNode(hash, possible_actions);
     currentNode->visits++;
 
-    currentNode->UpdateStrategy(possible_actions);
+    currentNode->UpdateStrategy(possible_actions, variant);
     vector<double> strategy = currentNode->strategy;
 
     vector<double> action_val(NUM_ACTIONS, 0.0);
@@ -88,9 +107,9 @@ double CFRSolver::CFR(Game &g, double p1, double p2) {
 
     // Regret weighted by opponent reach; average strategy by own reach.
     if (actingPlayer == 0) {
-        currentNode->UpdateRegret(regrets, possible_actions, /*opp_reach=*/p2, /*own_reach=*/p1, iteration, useCFRPlus);
+        currentNode->UpdateRegret(regrets, possible_actions, /*opp_reach=*/p2, /*own_reach=*/p1, iteration, variant, weighting);
     } else {
-        currentNode->UpdateRegret(regrets, possible_actions, /*opp_reach=*/p1, /*own_reach=*/p2, iteration, useCFRPlus);
+        currentNode->UpdateRegret(regrets, possible_actions, /*opp_reach=*/p1, /*own_reach=*/p2, iteration, variant, weighting);
     }
 
     return node_utility;

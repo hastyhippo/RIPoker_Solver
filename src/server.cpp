@@ -8,6 +8,7 @@
 #include <cctype>
 #include <atomic>
 #include <mutex>
+#include <map>
 #include <unordered_map>
 
 #include "server.h"
@@ -85,9 +86,14 @@ void Start(CFRSolver &cfr, int port) {
     // One exploitability sample per EXPLOIT_EVERY trained hands (plus an
     // iteration-0 baseline), for the frontend's graph. Guarded by solverMutex.
     // Monte Carlo over board reveals: EXPLOIT_MC_CHANCE cards per reveal.
+    // One curve per (variant, weighting) config, so A/B runs plot side by
+    // side; re-configuring a config rebuilds its curve, a stack change wipes
+    // all of them (curves at different stacks aren't comparable).
     const long long EXPLOIT_EVERY = 1000;
     const int EXPLOIT_MC_CHANCE = 4; // for each exploitabtility sample, take 4 candidates for the next card only
-    vector<pair<long long, double>> exploitHistory;
+    map<int, vector<pair<long long, double>>> exploitSeries; // config key -> curve
+    auto seriesKey = [](int variant, int weighting) { return variant * NUM_AVG_WEIGHTINGS + weighting; };
+    int seriesStack0 = cfr.stack0, seriesStack1 = cfr.stack1; // stacks the curves were trained at
 
     // Static action config (order + labels) fetched once by the frontend.
     svr.Get("/api/actions", [&](const httplib::Request &, httplib::Response &res) {
@@ -112,27 +118,41 @@ void Start(CFRSolver &cfr, int port) {
     svr.Post("/api/configure", [&](const httplib::Request &req, httplib::Response &res) {
         int s0 = ExtractJSONInt(req.body, "stack0", STARTING_STACK);
         int s1 = ExtractJSONInt(req.body, "stack1", STARTING_STACK);
-        bool cfrPlus = ExtractJSONBool(req.body, "cfrPlus", true);
+        int variant = ExtractJSONInt(req.body, "variant", VARIANT_CFR_PLUS);
+        if (variant < 0 || variant >= NUM_CFR_VARIANTS) variant = VARIANT_CFR_PLUS;
+        int weighting = ExtractJSONInt(req.body, "weighting", WEIGHT_LINEAR);
+        if (weighting < 0 || weighting >= NUM_AVG_WEIGHTINGS) weighting = WEIGHT_LINEAR;
+        // exploitFull: branch every board card exactly (slow); default Monte Carlo.
+        int chance = ExtractJSONBool(req.body, "exploitFull", false) ? 0 : EXPLOIT_MC_CHANCE;
         lock_guard<mutex> lock(solverMutex);
-        cfr.Reset(s0, s1, cfrPlus);
-        exploitHistory.clear();
-        exploitHistory.push_back({0, cfr.ComputeExploitability(EXPLOIT_MC_CHANCE)}); // uniform baseline
+        cfr.Reset(s0, s1, variant, weighting);
+        if (s0 != seriesStack0 || s1 != seriesStack1) {
+            exploitSeries.clear(); // other configs' curves were for different stacks
+            seriesStack0 = s0;
+            seriesStack1 = s1;
+        }
+        auto &curve = exploitSeries[seriesKey(variant, weighting)];
+        curve.clear(); // re-running a config rebuilds its line
+        curve.push_back({0, cfr.ComputeExploitability(chance)}); // uniform baseline
         res.set_content("{\"ok\": true}", "application/json");
     });
 
     svr.Post("/api/train", [&](const httplib::Request &req, httplib::Response &res) {
         int iters = ExtractJSONInt(req.body, "iterations", 0);
+        // exploitFull: branch every board card exactly (slow); default Monte Carlo.
+        int chance = ExtractJSONBool(req.body, "exploitFull", false) ? 0 : EXPLOIT_MC_CHANCE;
         lock_guard<mutex> lock(solverMutex);
         cancelRequested = false;
+        auto &curve = exploitSeries[seriesKey(cfr.variant, cfr.weighting)];
         // Baseline for servers that go straight to training without a configure.
-        if (exploitHistory.empty()) exploitHistory.push_back({0, cfr.ComputeExploitability(EXPLOIT_MC_CHANCE)});
+        if (curve.empty()) curve.push_back({0, cfr.ComputeExploitability(chance)});
         int trained = 0;
         for (int i = 0; i < iters; i++) {
             if (cancelRequested) break; // checked every single iteration for near-instant response
             cfr.TrainCFR();
             trained++;
             if (cfr.iteration % EXPLOIT_EVERY == 0) {
-                exploitHistory.push_back({cfr.iteration, cfr.ComputeExploitability(EXPLOIT_MC_CHANCE)});
+                curve.push_back({cfr.iteration, cfr.ComputeExploitability(chance)});
             }
         }
         ostringstream out;
@@ -149,10 +169,20 @@ void Start(CFRSolver &cfr, int port) {
     svr.Get("/api/exploitability", [&](const httplib::Request &, httplib::Response &res) {
         lock_guard<mutex> lock(solverMutex);
         ostringstream out;
-        out << fixed << setprecision(6) << "{\"points\": [";
-        for (size_t i = 0; i < exploitHistory.size(); i++) {
-            out << "{\"iter\": " << exploitHistory[i].first << ", \"value\": " << exploitHistory[i].second << "}";
-            if (i + 1 < exploitHistory.size()) out << ", ";
+        out << fixed << setprecision(6) << "{\"series\": [";
+        bool firstSeries = true;
+        for (auto &kv : exploitSeries) {
+            if (!firstSeries) out << ", ";
+            firstSeries = false;
+            int variant = kv.first / NUM_AVG_WEIGHTINGS, weighting = kv.first % NUM_AVG_WEIGHTINGS;
+            out << "{\"variant\": " << variant << ", \"weighting\": " << weighting << ", \"name\": ";
+            WriteJSONString(out, string(CFRSolver::VariantName(variant)) + " · " + CFRSolver::WeightingName(weighting));
+            out << ", \"points\": [";
+            for (size_t i = 0; i < kv.second.size(); i++) {
+                out << "{\"iter\": " << kv.second[i].first << ", \"value\": " << kv.second[i].second << "}";
+                if (i + 1 < kv.second.size()) out << ", ";
+            }
+            out << "]}";
         }
         out << "]}";
         res.set_content(out.str(), "application/json");
@@ -189,7 +219,7 @@ void Start(CFRSolver &cfr, int port) {
     });
 
     // Pre-listen, so the page shows the uniform baseline on first load.
-    exploitHistory.push_back({0, cfr.ComputeExploitability(EXPLOIT_MC_CHANCE)});
+    exploitSeries[seriesKey(cfr.variant, cfr.weighting)].push_back({0, cfr.ComputeExploitability(EXPLOIT_MC_CHANCE)});
 
     cout << "Serving on http://localhost:" << port << "/ (Ctrl-C to stop)\n";
     svr.listen("0.0.0.0", port);

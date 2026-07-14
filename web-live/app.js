@@ -83,16 +83,16 @@ const ServerBackend = {
   canTrain: true,
   async init() { /* server is already running */ },
   async actions() { return (await fetch('/api/actions')).json(); },
-  async configure(s0, s1, cfrPlus) {
+  async configure(s0, s1, variant, weighting, exploitFull) {
     return (await fetch('/api/configure', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ stack0: s0, stack1: s1, cfrPlus: !!cfrPlus }),
+      body: JSON.stringify({ stack0: s0, stack1: s1, variant: variant, weighting: weighting, exploitFull: !!exploitFull }),
     })).json();
   },
-  async train(iters) {
+  async train(iters, exploitFull) {
     return (await fetch('/api/train', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ iterations: iters }),
+      body: JSON.stringify({ iterations: iters, exploitFull: !!exploitFull }),
     })).json();
   },
   async cancelTrain() { await fetch('/api/train/cancel', { method: 'POST' }); },
@@ -123,8 +123,8 @@ function makeWasmBackend(mod) {
     canTrain: true,
     async init() {},
     async actions() { return read(mod.wasmActions()); },
-    async configure(s0, s1, cfrPlus) { return read(mod.wasmConfigure(s0, s1, !!cfrPlus)); },
-    async train(iters) { return read(mod.wasmTrain(iters)); },
+    async configure(s0, s1, variant, weighting, exploitFull) { return read(mod.wasmConfigure(s0, s1, variant, weighting, !!exploitFull)); },
+    async train(iters, exploitFull) { return read(mod.wasmTrain(iters, !!exploitFull)); },
     async cancelTrain() { /* chunk loop stops client-side; nothing server-side */ },
     async position(history, b0, b1) { return read(mod.wasmPosition(history || '', b0 || '', b1 || '')); },
     async randomPosition() { return read(mod.wasmRandomPosition()); },
@@ -147,7 +147,7 @@ async function selectBackend() {
     BACKEND = makeWasmBackend(mod);
     // No server pre-seeded a baseline, so configure once to match the default.
     const stack = parseInt(document.getElementById('stack').value, 10) || 10;
-    await BACKEND.configure(stack, stack, document.getElementById('cfrPlus').checked);
+    await BACKEND.configure(stack, stack, selectedVariant(), selectedWeighting(), exploitFullChecked());
     return;
   }
   BACKEND = ServerBackend; // no server and no WASM; calls will surface the error
@@ -367,12 +367,38 @@ async function fetchRandomPosition() {
   return BACKEND.randomPosition();
 }
 
-async function postConfigure(stack0, stack1, cfrPlus) {
-  return BACKEND.configure(stack0, stack1, cfrPlus);
+async function postConfigure(stack0, stack1, variant, weighting) {
+  return BACKEND.configure(stack0, stack1, variant, weighting, exploitFullChecked());
+}
+
+// Exploitability sampling mode: full traversal (exact, slow) vs Monte Carlo.
+// Read per request, so flipping it mid-run affects the next samples.
+function exploitFullChecked() {
+  return document.getElementById('exploitFull').checked;
+}
+
+// The CFR variant (regret rule, a CFRVariant id) from the Config dropdown.
+function selectedVariant() {
+  return parseInt(document.getElementById('algorithm').value, 10) || 0;
+}
+
+function selectedVariantName() {
+  const sel = document.getElementById('algorithm');
+  return sel.options[sel.selectedIndex].text;
+}
+
+// The average-strategy weighting (an AvgWeighting id) from the Config dropdown.
+function selectedWeighting() {
+  return parseInt(document.getElementById('weighting').value, 10) || 0;
+}
+
+function selectedWeightingName() {
+  const sel = document.getElementById('weighting');
+  return sel.options[sel.selectedIndex].text;
 }
 
 async function postTrain(iterations) {
-  return BACKEND.train(iterations);
+  return BACKEND.train(iterations, exploitFullChecked());
 }
 
 async function postCancelTrain() {
@@ -483,13 +509,12 @@ document.getElementById('saveStacksBtn').addEventListener('click', async () => {
 
   // Both players get the same stack (single effective-stack knob).
   const stack = parseInt(document.getElementById('stack').value, 10);
-  const cfrPlus = document.getElementById('cfrPlus').checked;
   try {
-    await postConfigure(stack, stack, cfrPlus);
+    await postConfigure(stack, stack, selectedVariant(), selectedWeighting());
     document.getElementById('history').value = '';
     document.getElementById('board0').value = '';
     document.getElementById('board1').value = '';
-    setStatus('stacksStatus', `Saved. All trained data wiped (stack: ${stack}, ${cfrPlus ? 'CFR+' : 'vanilla CFR'}).`, 'ok');
+    setStatus('stacksStatus', `Saved. All trained data wiped (stack: ${stack}, ${selectedVariantName()} · ${selectedWeightingName()}).`, 'ok');
     await refreshCurrentPosition();
     await refreshExploitChart();
   } catch (e) {
@@ -546,12 +571,41 @@ document.getElementById('randomBtn').addEventListener('click', async () => {
   }
 });
 
-// --- Exploitability chart: single-series SVG line, one point per 1,000 hands ---
-let exploitPoints = [];
+// --- Exploitability chart: one line per (variant, weighting) config, one
+// point per 1,000 hands ---
+let exploitSeries = []; // [{variant, weighting, name, points: [{iter, value}]}]
+
+// Fixed hue per variant id - a line's color follows the variant, never how
+// many lines are on screen. Hex values live in style.css (dark mode swaps them).
+const VARIANT_COLOR_VARS = ['--series-vanilla', '--series-cfrplus', '--series-pcfrplus'];
+function variantColor(variant, css) {
+  const varName = VARIANT_COLOR_VARS[variant];
+  const v = varName ? css.getPropertyValue(varName).trim() : '';
+  return v || css.getPropertyValue('--text-muted').trim();
+}
+
+// Fixed dash per weighting id - the second encoding, since hue is taken by
+// the variant: uniform dotted, linear solid, quadratic dashed.
+const WEIGHT_DASH = ['2 3', '', '7 3'];
+function weightDash(weighting) {
+  return WEIGHT_DASH[weighting] || '';
+}
+
+// Compact weighting tag for the end-of-line labels ("PCFR+ · quad 0.654").
+const WEIGHT_SHORT = ['uni', 'lin', 'quad'];
+function shortSeriesName(sr) {
+  const w = WEIGHT_SHORT[sr.weighting];
+  return w ? `${sr.name.split(' · ')[0]} · ${w}` : sr.name;
+}
+
+// A small line sample carrying both encodings (hue + dash), for the legend.
+function lineSwatch(sr, css) {
+  return `<svg class="line-swatch" width="20" height="10"><line x1="1" y1="5" x2="19" y2="5" stroke="${variantColor(sr.variant, css)}" stroke-width="2" stroke-dasharray="${weightDash(sr.weighting)}"/></svg>`;
+}
 
 async function refreshExploitChart() {
   try {
-    exploitPoints = (await BACKEND.exploitability()).points || [];
+    exploitSeries = (await BACKEND.exploitability()).series || [];
   } catch (e) { /* keep the last good series */ }
   renderExploitChart();
 }
@@ -572,32 +626,40 @@ function niceStep(range, targetTicks) {
 
 function renderExploitChart() {
   const host = document.getElementById('exploitChart');
+  const legendHost = document.getElementById('exploitLegend');
   if (!host) return;
-  if (exploitPoints.length === 0) {
+  const series = exploitSeries.filter((sr) => (sr.points || []).length > 0);
+  if (series.length === 0) {
+    if (legendHost) legendHost.innerHTML = '';
     host.innerHTML = '<div class="exploit-empty">No samples yet — a point is added every 1,000 trained hands.</div>';
     return;
   }
 
-  const W = host.clientWidth || 600;
-  const H = host.clientHeight || 120;
-  const M = { l: 46, r: 64, t: 8, b: 18 };
-  const iw = W - M.l - M.r;
-  const ih = H - M.t - M.b;
-
-  // Baseline-only series (just iteration 0): leave x-room for the next point.
-  const maxIter = exploitPoints[exploitPoints.length - 1].iter || 1000;
-  const maxVal = Math.max(...exploitPoints.map((p) => p.value), 0);
-  const yStep = niceStep(maxVal || 1, 3);
-  const yMax = Math.max(yStep, Math.ceil((maxVal || 1) / yStep) * yStep);
-  const x = (it) => M.l + (it / maxIter) * iw;
-  const y = (v) => M.t + ih - (v / yMax) * ih;
-
   const css = getComputedStyle(document.documentElement);
-  const accent = css.getPropertyValue('--accent').trim();
   const grid = css.getPropertyValue('--gridline').trim();
   const muted = css.getPropertyValue('--text-muted').trim();
   const secondary = css.getPropertyValue('--text-secondary').trim();
   const surface = css.getPropertyValue('--surface-1').trim();
+
+  // Legend once there are >= 2 lines; a lone line is named by its end label.
+  if (legendHost) {
+    legendHost.innerHTML = series.length < 2 ? '' : series.map((sr) =>
+      `<span>${lineSwatch(sr, css)}${sr.name}</span>`).join('');
+  }
+
+  const W = host.clientWidth || 600;
+  const H = host.clientHeight || 120;
+  const M = { l: 46, r: 150, t: 8, b: 18 }; // right margin fits "Vanilla CFR · quad 0.000"
+  const iw = W - M.l - M.r;
+  const ih = H - M.t - M.b;
+
+  // Baseline-only series (just iteration 0): leave x-room for the next point.
+  const maxIter = Math.max(1000, ...series.map((sr) => sr.points[sr.points.length - 1].iter));
+  const maxVal = Math.max(...series.flatMap((sr) => sr.points.map((p) => p.value)), 0);
+  const yStep = niceStep(maxVal || 1, 3);
+  const yMax = Math.max(yStep, Math.ceil((maxVal || 1) / yStep) * yStep);
+  const x = (it) => M.l + (it / maxIter) * iw;
+  const y = (v) => M.t + ih - (v / yMax) * ih;
 
   let s = `<svg width="${W}" height="${H}" font-family="inherit">`;
 
@@ -611,54 +673,88 @@ function renderExploitChart() {
     s += `<text x="${x(it)}" y="${M.t + ih + 13}" text-anchor="middle" font-size="10" fill="${muted}" style="font-variant-numeric:tabular-nums">${fmtIter(it)}</text>`;
   }
 
-  // Area wash + 2px line, both in the single series hue.
-  const pts = exploitPoints.map((p) => `${x(p.iter).toFixed(1)},${y(p.value).toFixed(1)}`);
-  if (exploitPoints.length > 1) {
-    s += `<path d="M${pts.join('L')}L${x(maxIter).toFixed(1)},${y(0)}L${x(exploitPoints[0].iter).toFixed(1)},${y(0)}Z" fill="${accent}" opacity="0.1"/>`;
-    s += `<path d="M${pts.join('L')}" fill="none" stroke="${accent}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+  // One 2px line + end dot per config: hue = variant, dash = weighting. The
+  // area wash only draws for a single line - overlapping washes muddy each other.
+  for (const sr of series) {
+    const color = variantColor(sr.variant, css);
+    const dash = weightDash(sr.weighting);
+    const pts = sr.points.map((p) => `${x(p.iter).toFixed(1)},${y(p.value).toFixed(1)}`);
+    if (sr.points.length > 1) {
+      if (series.length === 1) {
+        s += `<path d="M${pts.join('L')}L${x(sr.points[sr.points.length - 1].iter).toFixed(1)},${y(0)}L${x(sr.points[0].iter).toFixed(1)},${y(0)}Z" fill="${color}" opacity="0.1"/>`;
+      }
+      s += `<path d="M${pts.join('L')}" fill="none" stroke="${color}" stroke-width="2" stroke-dasharray="${dash}" stroke-linejoin="round" stroke-linecap="round"/>`;
+    }
+    const last = sr.points[sr.points.length - 1];
+    s += `<circle cx="${x(last.iter)}" cy="${y(last.value)}" r="4" fill="${color}" stroke="${surface}" stroke-width="2"/>`;
   }
 
-  // End dot with a surface ring, plus a direct label for the latest value.
-  const last = exploitPoints[exploitPoints.length - 1];
-  s += `<circle cx="${x(last.iter)}" cy="${y(last.value)}" r="4" fill="${accent}" stroke="${surface}" stroke-width="2"/>`;
-  s += `<text x="${x(last.iter) + 8}" y="${y(last.value) + 3.5}" font-size="11" fill="${secondary}" style="font-variant-numeric:tabular-nums">${last.value.toFixed(3)}</text>`;
+  // Direct end labels (variant name + latest value), nudged apart vertically
+  // when lines end close together. Text stays in ink; the dot carries the hue.
+  const labels = series.map((sr) => {
+    const last = sr.points[sr.points.length - 1];
+    return { name: shortSeriesName(sr), value: last.value, lx: x(last.iter), ly: y(last.value) };
+  }).sort((a, b) => a.ly - b.ly);
+  for (let i = 1; i < labels.length; i++) {
+    if (labels[i].ly - labels[i - 1].ly < 13) labels[i].ly = labels[i - 1].ly + 13;
+  }
+  // Nudging only pushes down; if the stack ran past the bottom, push it back
+  // up (keeping the 13px spacing) so no label clips or overlaps.
+  labels[labels.length - 1].ly = Math.min(labels[labels.length - 1].ly, M.t + ih);
+  for (let i = labels.length - 2; i >= 0; i--) {
+    labels[i].ly = Math.min(labels[i].ly, labels[i + 1].ly - 13);
+  }
+  for (const lb of labels) {
+    s += `<text x="${lb.lx + 8}" y="${Math.max(M.t + 4, lb.ly) + 3.5}" font-size="11" fill="${secondary}" style="font-variant-numeric:tabular-nums">${lb.name} ${lb.value.toFixed(3)}</text>`;
+  }
 
-  // Crosshair (snaps to the nearest sample) + transparent hover layer.
+  // Crosshair (snaps to the nearest sampled iteration) + transparent hover layer.
   s += `<line id="exCross" x1="0" y1="${M.t}" x2="0" y2="${M.t + ih}" stroke="${muted}" stroke-width="1" visibility="hidden"/>`;
-  s += `<circle id="exHoverDot" r="4" fill="${accent}" stroke="${surface}" stroke-width="2" visibility="hidden"/>`;
   s += `<rect x="${M.l}" y="${M.t}" width="${iw}" height="${ih}" fill="transparent"/>`;
   s += '</svg><div class="exploit-tip" id="exTip"></div>';
   host.innerHTML = s;
 
   const svg = host.querySelector('svg');
   const cross = host.querySelector('#exCross');
-  const hoverDot = host.querySelector('#exHoverDot');
   const tip = host.querySelector('#exTip');
+  const sampleIters = [...new Set(series.flatMap((sr) => sr.points.map((p) => p.iter)))].sort((a, b) => a - b);
 
   svg.addEventListener('pointermove', (ev) => {
     const px = ev.clientX - host.getBoundingClientRect().left;
-    let best = exploitPoints[0];
-    for (const p of exploitPoints) if (Math.abs(x(p.iter) - px) < Math.abs(x(best.iter) - px)) best = p;
-    cross.setAttribute('x1', x(best.iter));
-    cross.setAttribute('x2', x(best.iter));
+    let best = sampleIters[0];
+    for (const it of sampleIters) if (Math.abs(x(it) - px) < Math.abs(x(best) - px)) best = it;
+    cross.setAttribute('x1', x(best));
+    cross.setAttribute('x2', x(best));
     cross.setAttribute('visibility', 'visible');
-    hoverDot.setAttribute('cx', x(best.iter));
-    hoverDot.setAttribute('cy', y(best.value));
-    hoverDot.setAttribute('visibility', 'visible');
+
+    // One row per line that has a sample at this iteration.
     tip.innerHTML = '';
-    const b = document.createElement('b');
-    b.textContent = best.value.toFixed(4);
-    tip.appendChild(b);
-    tip.appendChild(document.createTextNode(` chips/hand · hand ${best.iter.toLocaleString()}`));
+    const head = document.createElement('div');
+    const headB = document.createElement('b');
+    headB.textContent = `hand ${best.toLocaleString()}`;
+    head.appendChild(headB);
+    tip.appendChild(head);
+    let topY = M.t + ih;
+    for (const sr of series) {
+      const p = sr.points.find((q) => q.iter === best);
+      if (!p) continue;
+      topY = Math.min(topY, y(p.value));
+      const row = document.createElement('div');
+      const chip = document.createElement('span');
+      chip.className = 'tip-chip';
+      chip.style.background = variantColor(sr.variant, css);
+      row.appendChild(chip);
+      row.appendChild(document.createTextNode(`${sr.name}: ${p.value.toFixed(4)}`));
+      tip.appendChild(row);
+    }
     tip.style.display = 'block';
-    const flip = x(best.iter) > W - 150;
-    tip.style.left = flip ? '' : x(best.iter) + 10 + 'px';
-    tip.style.right = flip ? W - x(best.iter) + 10 + 'px' : '';
-    tip.style.top = Math.max(0, y(best.value) - 30) + 'px';
+    const flip = x(best) > W - 170;
+    tip.style.left = flip ? '' : x(best) + 10 + 'px';
+    tip.style.right = flip ? W - x(best) + 10 + 'px' : '';
+    tip.style.top = Math.max(0, topY - 30) + 'px';
   });
   svg.addEventListener('pointerleave', () => {
     cross.setAttribute('visibility', 'hidden');
-    hoverDot.setAttribute('visibility', 'hidden');
     tip.style.display = 'none';
   });
 }

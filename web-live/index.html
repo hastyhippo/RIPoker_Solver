@@ -21,8 +21,19 @@
         <label class="field">Effective stack
           <input type="number" id="stack" value="10" min="1">
         </label>
-        <label class="field checkbox-field" title="A/B toggle: CFR+ (regret flooring + linear averaging) vs vanilla CFR. Applied on Save.">CFR+
-          <input type="checkbox" id="cfrPlus" checked>
+        <label class="field" title="Regret rule: how regrets accumulate and set the current strategy. Applied on Save (wipes trained data).">Algorithm
+          <select id="algorithm" class="algo-select">
+            <option value="0">Vanilla CFR</option>
+            <option value="1" selected>CFR+</option>
+            <option value="2">PCFR+</option>
+          </select>
+        </label>
+        <label class="field" title="How each iteration's strategy is weighted into the time-averaged strategy. Applied on Save (wipes trained data).">Averaging
+          <select id="weighting" class="algo-select">
+            <option value="0">Uniform</option>
+            <option value="1" selected>Linear</option>
+            <option value="2">Quadratic</option>
+          </select>
         </label>
         <button class="primary" id="saveStacksBtn" title="Saving wipes all trained data">Save</button>
         <div class="status" id="stacksStatus"></div>
@@ -89,8 +100,12 @@
 
   <!-- Exploitability convergence: one point per 1,000 trained hands -->
   <section class="exploit-panel">
-    <div class="panel-title">Exploitability <span class="panel-sub">chips/hand, sampled every 1,000 hands</span></div>
+    <div class="panel-title">Exploitability <span class="panel-sub">chips/hand, sampled every 1,000 hands</span><span id="exploitLegend" class="exploit-legend"></span></div>
     <div id="exploitChart" class="exploit-chart"></div>
+    <label class="exploit-mode" title="Applies to the next samples. Full traversal branches every board card at each reveal — exact but much slower; Monte Carlo samples 4 cards per reveal (fast, slight upward bias).">
+      <input type="checkbox" id="exploitFull">
+      Full traversal <span class="panel-sub">exact, slower — off = Monte Carlo (4 cards/reveal)</span>
+    </label>
   </section>
 </div>
 

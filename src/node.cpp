@@ -9,6 +9,7 @@
 
 #include "node.h"
 #include "game.h"
+#include "cfr_solver.h"
 #include "defines.h"
 using namespace std;
 
@@ -19,6 +20,7 @@ Node::Node(const vector<bool> &actions) {
     strategy_sum = vector<double>(NUM_ACTIONS, 0);
     regret_sum = vector<double>(NUM_ACTIONS, 0);
     strategy = vector<double>(NUM_ACTIONS, 0);
+    prediction = vector<double>(NUM_ACTIONS, 0);
 
     int n = 0; for (auto a : actions) if (a) n++;
     for (int i = 0; i < NUM_ACTIONS; i++) {
@@ -106,25 +108,38 @@ ParsedHash Node::ParseHash(const string& full_hash) {
     return parsed;
 }
 
-void Node::UpdateRegret(const vector<double> &new_regret, const vector<bool> &possible_actions, double opp_reach, double own_reach, long long iteration, bool cfrPlus) {
+void Node::UpdateRegret(const vector<double> &new_regret, const vector<bool> &possible_actions, double opp_reach, double own_reach, long long iteration, int variant, int weighting) {
+    // The two axes are independent: variant decides how regrets accumulate,
+    // weighting decides how this iteration's strategy enters the average.
+    double w = 1.0; // WEIGHT_UNIFORM
+    if (weighting == WEIGHT_LINEAR) w = (double)iteration;
+    else if (weighting == WEIGHT_QUADRATIC) w = (double)iteration * (double)iteration;
+
     for (int i = 0; i < NUM_ACTIONS; i++) {
         if (!possible_actions[i]) continue;
-        regret_sum[i] += opp_reach * new_regret[i];
-        if (cfrPlus) {
-            regret_sum[i] = max(0.0, regret_sum[i]); // CFR+ flooring
-            strategy_sum[i] += (double)iteration * own_reach * strategy[i]; // Linear averaging: weight by iteration number and own reach.
-        } else {
-            // Vanilla CFR: signed regrets accumulate; uniform averaging.
-            strategy_sum[i] += own_reach * strategy[i];
+        double inst = opp_reach * new_regret[i]; // instantaneous counterfactual regret
+        regret_sum[i] += inst;
+        if (variant != VARIANT_VANILLA) {
+            regret_sum[i] = max(0.0, regret_sum[i]); // RM+ flooring (CFR+/PCFR+)
         }
+        if (variant == VARIANT_PCFR_PLUS) {
+            prediction[i] = inst; // next visit's strategy predicts this regret repeats
+        }
+        strategy_sum[i] += w * own_reach * strategy[i];
     }
 }
 
-void Node::UpdateStrategy(const vector<bool> &possible_actions) {
+void Node::UpdateStrategy(const vector<bool> &possible_actions, int variant) {
+    // PCFR+ regret-matches on regrets + the predicted next regret (the last
+    // one observed); the other variants match on the regret sums alone.
+    auto base = [&](int i) {
+        return regret_sum[i] + (variant == VARIANT_PCFR_PLUS ? prediction[i] : 0.0);
+    };
+
     double normalising_sum = 0;
     for (int i = 0; i < NUM_ACTIONS; i++) {
         if (!possible_actions[i]) continue;
-        normalising_sum += max(0.0, regret_sum[i]);
+        normalising_sum += max(0.0, base(i));
     }
 
     int n = 0;
@@ -134,7 +149,7 @@ void Node::UpdateStrategy(const vector<bool> &possible_actions) {
     // carries mass from a different legal-action set.
     for (int i = 0; i < NUM_ACTIONS; i++) {
         if (!possible_actions[i]) { strategy[i] = 0.0; continue; }
-        strategy[i] = (normalising_sum == 0) ? 1.0 / (double)n : max(0.0, regret_sum[i] / normalising_sum);
+        strategy[i] = (normalising_sum == 0) ? 1.0 / (double)n : max(0.0, base(i)) / normalising_sum;
     }
 }
 
