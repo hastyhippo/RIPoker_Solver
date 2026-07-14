@@ -21,6 +21,9 @@
         <label class="field">Effective stack
           <input type="number" id="stack" value="10" min="1">
         </label>
+        <label class="field checkbox-field" title="A/B toggle: CFR+ (regret flooring + linear averaging) vs vanilla CFR. Applied on Save.">CFR+
+          <input type="checkbox" id="cfrPlus" checked>
+        </label>
         <button class="primary" id="saveStacksBtn" title="Saving wipes all trained data">Save</button>
         <div class="status" id="stacksStatus"></div>
       </div>

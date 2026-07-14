@@ -106,13 +106,17 @@ ParsedHash Node::ParseHash(const string& full_hash) {
     return parsed;
 }
 
-void Node::UpdateRegret(const vector<double> &new_regret, const vector<bool> &possible_actions, double opp_reach, double own_reach, long long iteration) {
+void Node::UpdateRegret(const vector<double> &new_regret, const vector<bool> &possible_actions, double opp_reach, double own_reach, long long iteration, bool cfrPlus) {
     for (int i = 0; i < NUM_ACTIONS; i++) {
         if (!possible_actions[i]) continue;
         regret_sum[i] += opp_reach * new_regret[i];
-        regret_sum[i] = max(0.0, regret_sum[i]); // CFR+ flooring
-        // Linear-CFR averaging: weight by iteration number and own reach.
-        strategy_sum[i] += (double)iteration * own_reach * strategy[i];
+        if (cfrPlus) {
+            regret_sum[i] = max(0.0, regret_sum[i]); // CFR+ flooring
+            strategy_sum[i] += (double)iteration * own_reach * strategy[i]; // Linear averaging: weight by iteration number and own reach.
+        } else {
+            // Vanilla CFR: signed regrets accumulate; uniform averaging.
+            strategy_sum[i] += own_reach * strategy[i];
+        }
     }
 }
 

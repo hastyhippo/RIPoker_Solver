@@ -25,12 +25,15 @@ class CFRSolver {
         long long iteration = 0;
         int stack0 = STARTING_STACK, stack1 = STARTING_STACK;
 
+        // A/B toggle: true = CFR+ (regret flooring + linear averaging),
+        bool useCFRPlus = true;
+
         Node *GetNode(const string &hash, const vector<bool> &possible_actions);
         void TrainCFR();
         double CFR(Game &g, double p1, double p2);
 
-        // Wipes all trained data and reconfigures stacks.
-        void Reset(int newStack0, int newStack1);
+        // Wipes all trained data and reconfigures stacks + algorithm variant.
+        void Reset(int newStack0, int newStack1, bool cfrPlus = true);
 
         // Time-averaged strategy, uniform over legal actions if never visited.
         vector<double> GetAverageStrategy(const string &hash, const vector<bool> &possible_actions);

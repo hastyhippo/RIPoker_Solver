@@ -83,10 +83,10 @@ const ServerBackend = {
   canTrain: true,
   async init() { /* server is already running */ },
   async actions() { return (await fetch('/api/actions')).json(); },
-  async configure(s0, s1) {
+  async configure(s0, s1, cfrPlus) {
     return (await fetch('/api/configure', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ stack0: s0, stack1: s1 }),
+      body: JSON.stringify({ stack0: s0, stack1: s1, cfrPlus: !!cfrPlus }),
     })).json();
   },
   async train(iters) {
@@ -123,7 +123,7 @@ function makeWasmBackend(mod) {
     canTrain: true,
     async init() {},
     async actions() { return read(mod.wasmActions()); },
-    async configure(s0, s1) { return read(mod.wasmConfigure(s0, s1)); },
+    async configure(s0, s1, cfrPlus) { return read(mod.wasmConfigure(s0, s1, !!cfrPlus)); },
     async train(iters) { return read(mod.wasmTrain(iters)); },
     async cancelTrain() { /* chunk loop stops client-side; nothing server-side */ },
     async position(history, b0, b1) { return read(mod.wasmPosition(history || '', b0 || '', b1 || '')); },
@@ -147,7 +147,7 @@ async function selectBackend() {
     BACKEND = makeWasmBackend(mod);
     // No server pre-seeded a baseline, so configure once to match the default.
     const stack = parseInt(document.getElementById('stack').value, 10) || 10;
-    await BACKEND.configure(stack, stack);
+    await BACKEND.configure(stack, stack, document.getElementById('cfrPlus').checked);
     return;
   }
   BACKEND = ServerBackend; // no server and no WASM; calls will surface the error
@@ -367,8 +367,8 @@ async function fetchRandomPosition() {
   return BACKEND.randomPosition();
 }
 
-async function postConfigure(stack0, stack1) {
-  return BACKEND.configure(stack0, stack1);
+async function postConfigure(stack0, stack1, cfrPlus) {
+  return BACKEND.configure(stack0, stack1, cfrPlus);
 }
 
 async function postTrain(iterations) {
@@ -483,12 +483,13 @@ document.getElementById('saveStacksBtn').addEventListener('click', async () => {
 
   // Both players get the same stack (single effective-stack knob).
   const stack = parseInt(document.getElementById('stack').value, 10);
+  const cfrPlus = document.getElementById('cfrPlus').checked;
   try {
-    await postConfigure(stack, stack);
+    await postConfigure(stack, stack, cfrPlus);
     document.getElementById('history').value = '';
     document.getElementById('board0').value = '';
     document.getElementById('board1').value = '';
-    setStatus('stacksStatus', `Saved. All trained data wiped (effective stack: ${stack}).`, 'ok');
+    setStatus('stacksStatus', `Saved. All trained data wiped (stack: ${stack}, ${cfrPlus ? 'CFR+' : 'vanilla CFR'}).`, 'ok');
     await refreshCurrentPosition();
     await refreshExploitChart();
   } catch (e) {

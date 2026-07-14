@@ -11,11 +11,12 @@
 #include "game.h"
 #include "defines.h"
 
-void CFRSolver::Reset(int newStack0, int newStack1) {
+void CFRSolver::Reset(int newStack0, int newStack1, bool cfrPlus) {
     positionMap.clear();
     iteration = 0;
     stack0 = newStack0;
     stack1 = newStack1;
+    useCFRPlus = cfrPlus;
 }
 
 void CFRSolver::TrainCFR() {
@@ -87,9 +88,9 @@ double CFRSolver::CFR(Game &g, double p1, double p2) {
 
     // Regret weighted by opponent reach; average strategy by own reach.
     if (actingPlayer == 0) {
-        currentNode->UpdateRegret(regrets, possible_actions, /*opp_reach=*/p2, /*own_reach=*/p1, iteration);
+        currentNode->UpdateRegret(regrets, possible_actions, /*opp_reach=*/p2, /*own_reach=*/p1, iteration, useCFRPlus);
     } else {
-        currentNode->UpdateRegret(regrets, possible_actions, /*opp_reach=*/p1, /*own_reach=*/p2, iteration);
+        currentNode->UpdateRegret(regrets, possible_actions, /*opp_reach=*/p1, /*own_reach=*/p2, iteration, useCFRPlus);
     }
 
     return node_utility;

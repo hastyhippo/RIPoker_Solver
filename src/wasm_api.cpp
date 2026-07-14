@@ -63,7 +63,7 @@ unsigned wasmResultPtr() { return (unsigned)(uintptr_t)g_out.data(); }
 // The impl_* builders are defined below; forward-declare so the exports can
 // wrap them.
 string impl_actions();
-string impl_configure(int stack0, int stack1);
+string impl_configure(int stack0, int stack1, bool cfrPlus);
 string impl_train(int iters);
 string impl_position(string history, string board0, string board1);
 string impl_randomPosition();
@@ -72,7 +72,7 @@ string impl_exploitability();
 // --- Exports (names match the frontend's WasmBackend); each returns the
 // byte length of the JSON now sitting at wasmResultPtr(). ---
 unsigned wasmActions() { return emitResult(impl_actions()); }
-unsigned wasmConfigure(int s0, int s1) { return emitResult(impl_configure(s0, s1)); }
+unsigned wasmConfigure(int s0, int s1, bool cfrPlus) { return emitResult(impl_configure(s0, s1, cfrPlus)); }
 unsigned wasmTrain(int iters) { return emitResult(impl_train(iters)); }
 unsigned wasmPosition(string h, string b0, string b1) { return emitResult(impl_position(h, b0, b1)); }
 unsigned wasmRandomPosition() { return emitResult(impl_randomPosition()); }
@@ -98,10 +98,11 @@ string impl_actions() {
     return out.str();
 }
 
-// Wipe + reconfigure stacks, then seed the untrained exploitability baseline.
-string impl_configure(int stack0, int stack1) {
+// Wipe + reconfigure stacks/algorithm, then seed the untrained exploitability
+// baseline. cfrPlus: CFR+ (flooring + linear averaging) vs vanilla CFR.
+string impl_configure(int stack0, int stack1, bool cfrPlus) {
     ensureReady();
-    g_cfr.Reset(stack0, stack1);
+    g_cfr.Reset(stack0, stack1, cfrPlus);
     g_exploit.clear();
     g_exploit.push_back({0, g_cfr.ComputeExploitability(EXPLOIT_MC_CHANCE)});
     return "{\"ok\": true}";

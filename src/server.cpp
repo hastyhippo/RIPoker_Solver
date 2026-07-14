@@ -49,6 +49,20 @@ int ExtractJSONInt(const string &body, const string &key, int def) {
     return stoi(body.substr(start, pos - start));
 }
 
+// Minimal bool extractor for flat {"key": true} request bodies.
+bool ExtractJSONBool(const string &body, const string &key, bool def) {
+    string needle = "\"" + key + "\"";
+    size_t pos = body.find(needle);
+    if (pos == string::npos) return def;
+    pos = body.find(':', pos + needle.size());
+    if (pos == string::npos) return def;
+    pos++;
+    while (pos < body.size() && isspace((unsigned char)body[pos])) pos++;
+    if (body.compare(pos, 4, "true") == 0) return true;
+    if (body.compare(pos, 5, "false") == 0) return false;
+    return def;
+}
+
 } // namespace
 
 namespace Server {
@@ -98,8 +112,9 @@ void Start(CFRSolver &cfr, int port) {
     svr.Post("/api/configure", [&](const httplib::Request &req, httplib::Response &res) {
         int s0 = ExtractJSONInt(req.body, "stack0", STARTING_STACK);
         int s1 = ExtractJSONInt(req.body, "stack1", STARTING_STACK);
+        bool cfrPlus = ExtractJSONBool(req.body, "cfrPlus", true);
         lock_guard<mutex> lock(solverMutex);
-        cfr.Reset(s0, s1);
+        cfr.Reset(s0, s1, cfrPlus);
         exploitHistory.clear();
         exploitHistory.push_back({0, cfr.ComputeExploitability(EXPLOIT_MC_CHANCE)}); // uniform baseline
         res.set_content("{\"ok\": true}", "application/json");
