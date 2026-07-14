@@ -100,12 +100,19 @@
 
   <!-- Exploitability convergence: one point per 1,000 trained hands -->
   <section class="exploit-panel">
-    <div class="panel-title">Exploitability <span class="panel-sub">chips/hand, sampled every 1,000 hands</span><span id="exploitLegend" class="exploit-legend"></span></div>
+    <div class="panel-title">Exploitability <span class="panel-sub">chips/hand</span><span id="exploitLegend" class="exploit-legend"></span></div>
     <div id="exploitChart" class="exploit-chart"></div>
-    <label class="exploit-mode" title="Applies to the next samples. Full traversal branches every board card at each reveal — exact but much slower; Monte Carlo samples 4 cards per reveal (fast, slight upward bias).">
-      <input type="checkbox" id="exploitFull">
-      Full traversal <span class="panel-sub">exact, slower — off = Monte Carlo (4 cards/reveal)</span>
-    </label>
+    <div class="exploit-controls">
+      <label class="exploit-mode" title="How many trained hands between exploitability samples. Applies to the next training run.">
+        Sample every
+        <input type="number" id="exploitEvery" value="1000" min="1" step="100" class="exploit-every">
+        <span class="panel-sub">hands</span>
+      </label>
+      <label class="exploit-mode" title="Applies to the next samples. Full traversal branches every board card at each reveal — exact but much slower; Monte Carlo samples 4 cards per reveal (fast, slight upward bias).">
+        <input type="checkbox" id="exploitFull">
+        Full traversal <span class="panel-sub">exact, slower — off = Monte Carlo (4 cards/reveal)</span>
+      </label>
+    </div>
   </section>
 </div>
 

@@ -89,10 +89,10 @@ const ServerBackend = {
       body: JSON.stringify({ stack0: s0, stack1: s1, variant: variant, weighting: weighting, exploitFull: !!exploitFull }),
     })).json();
   },
-  async train(iters, exploitFull) {
+  async train(iters, exploitFull, exploitEvery) {
     return (await fetch('/api/train', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ iterations: iters, exploitFull: !!exploitFull }),
+      body: JSON.stringify({ iterations: iters, exploitFull: !!exploitFull, exploitEvery: exploitEvery }),
     })).json();
   },
   async cancelTrain() { await fetch('/api/train/cancel', { method: 'POST' }); },
@@ -124,7 +124,7 @@ function makeWasmBackend(mod) {
     async init() {},
     async actions() { return read(mod.wasmActions()); },
     async configure(s0, s1, variant, weighting, exploitFull) { return read(mod.wasmConfigure(s0, s1, variant, weighting, !!exploitFull)); },
-    async train(iters, exploitFull) { return read(mod.wasmTrain(iters, !!exploitFull)); },
+    async train(iters, exploitFull, exploitEvery) { return read(mod.wasmTrain(iters, !!exploitFull, exploitEvery)); },
     async cancelTrain() { /* chunk loop stops client-side; nothing server-side */ },
     async position(history, b0, b1) { return read(mod.wasmPosition(history || '', b0 || '', b1 || '')); },
     async randomPosition() { return read(mod.wasmRandomPosition()); },
@@ -398,7 +398,13 @@ function selectedWeightingName() {
 }
 
 async function postTrain(iterations) {
-  return BACKEND.train(iterations, exploitFullChecked());
+  return BACKEND.train(iterations, exploitFullChecked(), exploitEveryValue());
+}
+
+// Trained hands between exploitability samples, from the field under the chart.
+function exploitEveryValue() {
+  const v = parseInt(document.getElementById('exploitEvery').value, 10);
+  return Number.isFinite(v) && v > 0 ? v : 1000;
 }
 
 async function postCancelTrain() {
@@ -631,7 +637,7 @@ function renderExploitChart() {
   const series = exploitSeries.filter((sr) => (sr.points || []).length > 0);
   if (series.length === 0) {
     if (legendHost) legendHost.innerHTML = '';
-    host.innerHTML = '<div class="exploit-empty">No samples yet — a point is added every 1,000 trained hands.</div>';
+    host.innerHTML = `<div class="exploit-empty">No samples yet — a point is added every ${exploitEveryValue().toLocaleString()} trained hands.</div>`;
     return;
   }
 

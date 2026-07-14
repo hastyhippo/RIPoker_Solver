@@ -35,7 +35,6 @@ int g_seriesStack0 = STARTING_STACK, g_seriesStack1 = STARTING_STACK;
 mt19937 g_rng{RandomSeed()};
 bool g_ready = false;
 
-const long long EXPLOIT_EVERY = 1000;
 const int EXPLOIT_MC_CHANCE = 4; // Monte-Carlo board reveals, matches the server
 
 // One-time card-strength table build (the CLI/server do this in Initialise()).
@@ -70,7 +69,7 @@ unsigned wasmResultPtr() { return (unsigned)(uintptr_t)g_out.data(); }
 // wrap them.
 string impl_actions();
 string impl_configure(int stack0, int stack1, int variant, int weighting, bool exploitFull);
-string impl_train(int iters, bool exploitFull);
+string impl_train(int iters, bool exploitFull, int exploitEvery);
 string impl_position(string history, string board0, string board1);
 string impl_randomPosition();
 string impl_exploitability();
@@ -79,7 +78,7 @@ string impl_exploitability();
 // byte length of the JSON now sitting at wasmResultPtr(). ---
 unsigned wasmActions() { return emitResult(impl_actions()); }
 unsigned wasmConfigure(int s0, int s1, int variant, int weighting, bool exploitFull) { return emitResult(impl_configure(s0, s1, variant, weighting, exploitFull)); }
-unsigned wasmTrain(int iters, bool exploitFull) { return emitResult(impl_train(iters, exploitFull)); }
+unsigned wasmTrain(int iters, bool exploitFull, int exploitEvery) { return emitResult(impl_train(iters, exploitFull, exploitEvery)); }
 unsigned wasmPosition(string h, string b0, string b1) { return emitResult(impl_position(h, b0, b1)); }
 unsigned wasmRandomPosition() { return emitResult(impl_randomPosition()); }
 unsigned wasmExploitability() { return emitResult(impl_exploitability()); }
@@ -126,16 +125,18 @@ string impl_configure(int stack0, int stack1, int variant, int weighting, bool e
 
 // Train `iters` hands, sampling exploitability every EXPLOIT_EVERY, and return
 // the same status shape as POST /api/train. Called in small chunks by the UI.
-string impl_train(int iters, bool exploitFull) {
+string impl_train(int iters, bool exploitFull, int exploitEvery) {
     ensureReady();
     const int chance = exploitFull ? 0 : EXPLOIT_MC_CHANCE;
+    // Trained hands between exploitability samples for this run.
+    const long long every = max(1, exploitEvery);
     auto &curve = g_exploit[seriesKey(g_cfr.variant, g_cfr.weighting)];
     if (curve.empty()) curve.push_back({0, g_cfr.ComputeExploitability(chance)});
     int trained = 0;
     for (int i = 0; i < iters; i++) {
         g_cfr.TrainCFR();
         trained++;
-        if (g_cfr.iteration % EXPLOIT_EVERY == 0) {
+        if (g_cfr.iteration % every == 0) {
             curve.push_back({g_cfr.iteration, g_cfr.ComputeExploitability(chance)});
         }
     }

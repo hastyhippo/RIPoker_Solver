@@ -246,18 +246,32 @@ body {
   display: none;
 }
 .exploit-tip b { color: var(--text-primary); font-size: 12px; }
-/* Sampling-mode toggle row under the chart */
+/* Sampling controls row under the chart (interval field + mode toggle) */
+.exploit-controls {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  margin-top: 6px;
+}
 .exploit-mode {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-top: 6px;
   font-size: 12px;
   color: var(--text-secondary);
   width: fit-content;
   cursor: pointer;
 }
-.exploit-mode input { accent-color: var(--accent); margin: 0; }
+.exploit-mode input[type="checkbox"] { accent-color: var(--accent); margin: 0; }
+.exploit-every {
+  font: inherit;
+  width: 80px;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--page);
+  color: var(--text-primary);
+}
 
 .exploit-tip .tip-chip {
   display: inline-block;

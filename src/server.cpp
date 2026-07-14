@@ -84,7 +84,8 @@ void Start(CFRSolver &cfr, int port) {
     mutex solverMutex;
 
     // One exploitability sample per EXPLOIT_EVERY trained hands (plus an
-    // iteration-0 baseline), for the frontend's graph. Guarded by solverMutex.
+    // iteration-0 baseline), for the frontend's graph; train requests can
+    // override the interval per run ("exploitEvery"). Guarded by solverMutex.
     // Monte Carlo over board reveals: EXPLOIT_MC_CHANCE cards per reveal.
     // One curve per (variant, weighting) config, so A/B runs plot side by
     // side; re-configuring a config rebuilds its curve, a stack change wipes
@@ -141,6 +142,8 @@ void Start(CFRSolver &cfr, int port) {
         int iters = ExtractJSONInt(req.body, "iterations", 0);
         // exploitFull: branch every board card exactly (slow); default Monte Carlo.
         int chance = ExtractJSONBool(req.body, "exploitFull", false) ? 0 : EXPLOIT_MC_CHANCE;
+        // Trained hands between exploitability samples for this run.
+        long long exploitEvery = max(1, ExtractJSONInt(req.body, "exploitEvery", (int)EXPLOIT_EVERY));
         lock_guard<mutex> lock(solverMutex);
         cancelRequested = false;
         auto &curve = exploitSeries[seriesKey(cfr.variant, cfr.weighting)];
@@ -151,7 +154,7 @@ void Start(CFRSolver &cfr, int port) {
             if (cancelRequested) break; // checked every single iteration for near-instant response
             cfr.TrainCFR();
             trained++;
-            if (cfr.iteration % EXPLOIT_EVERY == 0) {
+            if (cfr.iteration % exploitEvery == 0) {
                 curve.push_back({cfr.iteration, cfr.ComputeExploitability(chance)});
             }
         }
