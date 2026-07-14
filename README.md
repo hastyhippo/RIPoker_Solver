@@ -32,6 +32,13 @@ High card: The top card out of the 3. Ties are broken by first point of differen
 <img width="894" height="195" alt="image" src="https://github.com/user-attachments/assets/27807190-7dc7-4124-9dde-964c842625b1" />
 
 Optimisations to regret updates:
+
 CFR+ - Regrets are clamped to be positive. This prevents deep valleys where a strong negative regret takes long time to revert to positive, more closely aligning with the strategy clamping regrets as max(0, regret).
+
 PCFR - Regret updates from the previous iterations are added to the strategy for the current iteration. This optimisation is similar to the "momentum" updates in gradient descent, where preivous updates often provides a strong estimate for the current update.
 
+Weighting optimisations:
+
+Linear - Weights the strategy contributions to the final strategy by (iteration * value). So the strategy produced at iteration 500 has 500x more weight than strategy produced at iteration 1. Normaliser takes the weighted average of these.
+
+Quadratic - Weights by (iteration^2 * value). More aggressively rejects previous strategy. Found to work well with PCFR.
